@@ -15,7 +15,7 @@ export async function startQuirkServer(q = {}) {
     res.writeHead(s, { 'content-type': 'application/json', 'x-request-id': 'r', 'cache-control': 'no-store', ...extra });
     res.end(body === undefined ? '' : JSON.stringify(body));
   };
-  const readBody = (req) => (req.cachedBody ??= new Promise((done) => { const parts = []; let size = 0; req.on('data', (d) => { size += d.length; if (q.noLimit || size < (q.keep ?? 1 << 20)) parts.push(d); }); req.on('end', () => done(Buffer.concat(parts))); }));
+  const readBody = (req) => (req.cachedBody ??= new Promise((done) => { const parts = []; let size = 0; req.on('data', (d) => { size += d.length; if (q.noLimit || size < (q.keep ?? 1 << 20)) parts.push(d); }); req.on('end', () => { req.overflow = size >= (q.keep ?? 1 << 20) && !q.noLimit; done(Buffer.concat(parts)); }); }));
   const unauthorized = (res) => (q.loginRedirect ? json(res, 302, undefined, { location: '/login' }) : json(res, 401, { error: 'unauthorized' }));
 
   const server = createServer(q.maxHeaderSize ? { maxHeaderSize: q.maxHeaderSize } : {}, async (req, res) => {
@@ -72,6 +72,7 @@ export async function startQuirkServer(q = {}) {
           const want = q.jsonApi ? 'application/vnd.api+json' : 'application/json';
           if (q.jsonApi ? req.headers['content-type'] !== want : type !== want) return json(res, 415, { error: 'media type' });
           const buf = await readBody(req);
+          if (req.overflow) return json(res, 413, { error: 'too large' });
           let text;
           if (q.utf8Replace) text = buf.toString('utf8'); else try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { return json(res, 400, { error: 'utf8' }); }
           if (buf.length >= (q.keep ?? 1 << 20) && !q.noLimit) return json(res, 413, { error: 'too large' });

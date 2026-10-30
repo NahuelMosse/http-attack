@@ -17,7 +17,7 @@ test('nested bodies: the varying field is found at any depth and --vary takes a 
   const body = '{"item":{"name":"Ana","email":"ana@example.com"}}';
   const r = await attack(s.url, [...ALICE, '--write', `POST /items ${body}`, '--unique', `POST /items ${body}`]);
   assert.equal(r.row('ok:legit-write:POST /items')?.verdict, 'pass');
-  assert.equal(r.byProbe('wrong-type-number')[0].verdict, 'pass', 'the wrong-type probe ran on the nested string field');
+  assert.equal(r.byProbe('wrong-type-number-item.name')[0].verdict, 'pass', 'the wrong-type probe ran on the nested string field');
   assert.equal(r.row('ok:race-identical-creates:POST /items')?.verdict, 'pass', 'varied creates do not collide');
   const pointer = await attack(s.url, [...ALICE, '--write', `POST /items ${body}`, '--vary', '/item/email']);
   assert.equal(pointer.row('ok:legit-write:POST /items')?.verdict, 'pass');
@@ -121,12 +121,12 @@ test('repo files are reported', () => withServer({ repoFile: true }, async (s) =
 
 test('Rails-style 422 on a foreign Origin is a CSRF refusal', async () => {
   await withServer({ csrf422: true }, async (s) => {
-    const r = await attack(s.url, [...ALICE, '--write', ITEM, '--csrf']);
+    const r = await attack(s.url, [...ALICE, '--header', 'Cookie: session=alice', '--write', ITEM, '--csrf']);
     assert.equal(r.row('ok:origin-another-site:POST /items')?.verdict, 'pass');
     assert.ok(!r.report.rows.some((x) => x.rule === 'csrf'));
   });
   await withServer({}, async (s) => {
-    const r = await attack(s.url, [...ALICE, '--write', ITEM, '--csrf']);
+    const r = await attack(s.url, [...ALICE, '--header', 'Cookie: session=alice', '--write', ITEM, '--csrf']);
     assert.ok(r.has('csrf:origin-another-site:POST /items'), 'a server that ignores Origin is vulnerable');
   });
 });

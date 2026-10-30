@@ -58,7 +58,10 @@ export async function malformedInput(run, w) {
   } else run.notRun(spec('json-probes', 'JSON probes'), 'the write body is not JSON: malformed JSON, invalid UTF-8, media type and wrong-type probes need a JSON body');
 
   // Only a 413 shows the limit works. A 400/422 is the validation of the field the probe padded: the limit was not tested.
-  const limitVerdict = async (s, res, expected, rule) => {
+  // A server that answers early and closes can reset a large upload: the request is repeated once before a drop is judged.
+  const limitVerdict = async (s, body, expected, rule) => {
+    let res = await send(w.method, body);
+    if (res.s === null || res.truncated) res = await send(w.method, body);
     if (await run.transportFault(res, s, expected)) return;
     if (res.s === 413) run.pass(s, res.s, expected);
     else if (granted(res)) run.fail(rule, s, res.s, expected, rule === 'limit-counts-characters' ? `${res.s} for a body over the limit` : undefined);
@@ -70,7 +73,7 @@ export async function malformedInput(run, w) {
   else {
     const body = withField(wire(w, st), (v) => v + 'a'.repeat(MIB));
     if (body === null) run.notRun(big, 'the body has no string field to pad to 1 MB');
-    else await limitVerdict(big, await send(w.method, body), '413, never stored and never a 5xx', 'no-body-limit');
+    else await limitVerdict(big, body, '413, never stored and never a 5xx', 'no-body-limit');
   }
 
   const bytesProbe = spec('limit-counts-bytes', 'body 1+ byte over the limit made of multibyte characters');
@@ -83,7 +86,7 @@ export async function malformedInput(run, w) {
     const rest = Buffer.byteLength(withField(q, () => '') ?? '');
     const body = withField(q, () => 'é'.repeat(Math.floor((st.bodyLimit - rest) / 2) + 1));
     if (body === null) run.notRun(bytesProbe, 'the body has no string field to pad with multibyte characters');
-    else await limitVerdict(bytesProbe, await send(w.method, body), '413: the limit counts bytes, not characters', 'limit-counts-characters');
+    else await limitVerdict(bytesProbe, body, '413: the limit counts bytes, not characters', 'limit-counts-characters');
   }
 
   for (const m of ['PUT', 'DELETE', 'PATCH'].filter((x) => x !== w.method)) {
