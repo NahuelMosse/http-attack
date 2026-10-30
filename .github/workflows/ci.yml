@@ -1,0 +1,31 @@
+name: ci
+on:
+  push:
+    branches: [main, hardening]
+  pull_request:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['22.13', '24']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit and integration tests
+        run: npm test
+      - name: Fixtures end to end, three identical runs
+        run: node test/e2e-fixtures.mjs 3
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --global @anthropic-ai/claude-code
+      - run: claude plugin validate .

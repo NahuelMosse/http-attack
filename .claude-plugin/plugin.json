@@ -1,0 +1,9 @@
+{
+  "name": "http-attack",
+  "version": "1.0.0",
+  "description": "Break-test an HTTP API running on your machine: malformed input, parser errors, races, bodies that never end, injection in search, database faults, missing auth, IDOR and CSRF.",
+  "license": "MIT",
+  "author": {
+    "name": "Nahuel Mosse"
+  }
+}

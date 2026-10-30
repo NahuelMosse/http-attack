@@ -1,0 +1,13 @@
+{
+  "name": "http-attack",
+  "owner": {
+    "name": "Nahuel Mosse"
+  },
+  "plugins": [
+    {
+      "name": "http-attack",
+      "source": "./",
+      "description": "Adversarial probes against a local HTTP API."
+    }
+  ]
+}
