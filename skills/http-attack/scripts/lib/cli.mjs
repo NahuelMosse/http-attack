@@ -1,0 +1,103 @@
+import { HELP, parseArgs } from './args.mjs';
+import { applyIgnores, loadConfig } from './config.mjs';
+import { UsageError } from './errors.mjs';
+import { createClient } from './http.mjs';
+import { EXIT } from './registry.mjs';
+import { exitCode, renderJson, renderText, summarize } from './report.mjs';
+import { Run } from './run.mjs';
+import { accessProbes, csrfProbes, inferTemplate, legitWrite, notRunDependents, readsWithoutCredentials } from './probes/auth.mjs';
+import { faultProbe } from './probes/fault.mjs';
+import { malformedInput } from './probes/input.mjs';
+import { parserProbes } from './probes/parser.mjs';
+import { pathProbes } from './probes/paths.mjs';
+import { persistSave, persistVerify } from './probes/persist.mjs';
+import { raceProbe } from './probes/race.mjs';
+import { resourceProbes } from './probes/resources.mjs';
+import { searchProbes } from './probes/search.mjs';
+
+const MAX_MISSING_LISTED = 10;
+
+// Command-line options and the config file, merged: the command line wins, lists are concatenated.
+function mergeOptions(opt, config) {
+  const lower = (list) => list.map((h) => String(h).trim().toLowerCase()).filter(Boolean);
+  return {
+    ...opt,
+    writes: [...config.writes, ...opt.writes],
+    uniques: [...config.uniques, ...opt.uniques],
+    reads: [...config.reads, ...opt.reads],
+    searches: [...config.searches, ...opt.searches],
+    common: opt.common.length ? opt.common : lower(config.commonHeaders ?? []),
+    rawExempt: opt.rawExempt ?? config.rawExempt,
+    authHeaderNames: [...new Set([...lower(config.authHeaderNames ?? []), ...opt.authHeaderNames])],
+    itemPath: opt.itemPath ?? config.itemPath,
+  };
+}
+
+async function runAll(run) {
+  const { opts, client } = run;
+  const first = await client.send('GET', '/', { common: false });
+  if (first.s === null) throw new UsageError(`The app does not answer at ${client.base.origin}: ${first.err}`);
+  run.itemPath = opts.itemPath;
+  run.itemTemplate = opts.itemPath;
+  run.state = {};
+
+  const ready = [];
+  for (const w of opts.writes) {
+    const legit = await legitWrite(run, w);
+    if (legit.ok && legit.item && !run.itemTemplate) run.itemTemplate = inferTemplate(legit.item, legit.res);
+    if (!legit.ok) notRunDependents(run, w, legit.res ? `answered ${legit.res.s}` : 'no usable answer');
+    else { ready.push(w); await accessProbes(run, w, legit); }
+  }
+  await readsWithoutCredentials(run);
+  for (const w of ready) await malformedInput(run, w);
+  await pathProbes(run, { writes: opts.writes, itemTemplate: run.itemTemplate });
+  for (const s of opts.searches) await searchProbes(run, s);
+  await parserProbes(run, { writes: opts.writes });
+  for (const w of ready) await resourceProbes(run, w);
+  for (const u of opts.uniques) await raceProbe(run, u);
+  if (opts.csrf) for (const w of ready) await csrfProbes(run, w);
+  if (opts.faultSqlite || opts.faultCmd) await faultProbe(run, ready[0] ?? opts.writes[0]);
+
+  if (opts.common.length) {
+    const spec = { group: 'headers', probe: 'common-headers', target: 'responses', name: `every response carries ${opts.common.join(', ')}` };
+    const listed = [...client.misses].slice(0, MAX_MISSING_LISTED).map(([what, missing]) => `${what} lacks ${missing.join(', ')}`);
+    if (listed.length) run.fail('headers-missing', spec, `${client.misses.size} responses`, spec.name, `${listed.join('; ')}${client.misses.size > listed.length ? `; and ${client.misses.size - listed.length} more` : ''}`);
+    else run.pass(spec, 'all', spec.name);
+  }
+}
+
+// Returns the exit code; output goes through `io` so tests can capture it.
+export async function main(argv, io = {}) {
+  const out = io.stdout ?? ((s) => process.stdout.write(s));
+  const err = io.stderr ?? ((s) => process.stderr.write(s));
+  const env = io.env ?? process.env;
+  const cwd = io.cwd ?? process.cwd();
+  try {
+    const parsed = parseArgs(argv, { cwd, env });
+    if (parsed.help) { out(`${HELP}\n`); return EXIT.OK; }
+    const config = loadConfig(parsed.opt.config, { cwd, env });
+    const opts = mergeOptions(parsed.opt, config);
+    const client = createClient(parsed.base, opts);
+    const run = new Run({ client, opts, config });
+
+    if (opts.persistSave || opts.persistVerify) {
+      run.itemPath = opts.itemPath;
+      const result = opts.persistSave ? await persistSave(run, opts.persistSave) : await persistVerify(run, opts.persistVerify);
+      const first = await client.alive();
+      if (!first) throw new UsageError(`The app does not answer at ${parsed.base.origin}.`);
+      out(opts.format === 'json' ? `${JSON.stringify({ schemaVersion: 1, ok: result.ok, ...result.data }, null, 2)}\n` : `${result.message}\n`);
+      return result.ok ? EXIT.OK : EXIT.FINDINGS;
+    }
+
+    await runAll(run);
+    const unusedIgnores = applyIgnores(run.rows, config.ignore);
+    const summary = summarize(run.rows);
+    const report = { base: parsed.base.origin, rows: run.rows, summary, unusedIgnores };
+    out(`${opts.format === 'json' ? renderJson(report) : renderText(report)}\n`);
+    return exitCode(summary);
+  } catch (e) {
+    if (e instanceof UsageError) err(`http-attack: ${e.message}\n`);
+    else err(`http-attack crashed: ${e?.stack ?? e}\n`);
+    return EXIT.ERROR;
+  }
+}

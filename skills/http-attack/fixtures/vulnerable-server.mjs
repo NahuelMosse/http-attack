@@ -1,5 +1,5 @@
-// A deliberately broken items API, to prove that http-attack.mjs finds what it claims to find.
-// node vulnerable-server.mjs <port> <sqlite-file | :memory:>   Users: "Authorization: Bearer alice" and "Bearer bob".
+// A deliberately broken API, to prove that http-attack finds what it claims to find.
+// node vulnerable-server.mjs <port | 0> <sqlite-file | :memory:>   Users: "Authorization: Bearer alice" and "Bearer bob".
 // Every defect below is one the script must report. Do not copy this code.
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +7,8 @@ import { DatabaseSync } from 'node:sqlite';
 
 const [port, file] = process.argv.slice(2);
 const db = new DatabaseSync(file);
-db.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, owner TEXT, name TEXT, email TEXT UNIQUE); CREATE TABLE IF NOT EXISTS audit (at TEXT)');
+db.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, owner TEXT, name TEXT, email TEXT UNIQUE); CREATE TABLE IF NOT EXISTS audit (at TEXT); '
+  + 'CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, title TEXT)');
 
 const reply = (res, status, body, extra = {}) => {
   res.writeHead(status, { 'content-type': 'application/json', 'x-request-id': randomUUID(), 'cache-control': 'no-store', ...extra });
@@ -22,6 +23,20 @@ createServer(async (req, res) => {
     const url = new URL(req.url, 'http://local'); // "//" throws; "//items" becomes host "items"
     const path = decodeURIComponent(url.pathname); // "%" throws
     if (path === '/') return reply(res, 200, { ok: true });
+    if (path === '/.git/config') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('[core]\n\trepositoryformatversion = 0\n'); } // the repo is served
+    if (path === '/notes' && req.method === 'POST') { // no authentication, no unique key, no CSRF check, no body limit
+      const raw = await readAll(req);
+      let b; try { b = JSON.parse(raw); } catch { return reply(res, 400, { error: 'bad json' }); }
+      if (typeof b?.title !== 'string') return reply(res, 400, { error: 'invalid' });
+      await new Promise((r) => setTimeout(r, 20));
+      const { lastInsertRowid } = db.prepare('INSERT INTO notes (title) VALUES (?)').run(b.title);
+      return reply(res, 201, { id: Number(lastInsertRowid), title: b.title }, { location: `/notes/${Number(lastInsertRowid)}` });
+    }
+    const note = path.match(/^\/notes\/(\d+)$/);
+    if (note) {
+      const row = db.prepare('SELECT id, title FROM notes WHERE id = ?').get(Number(note[1]));
+      return row ? reply(res, 200, row) : reply(res, 404, { error: 'not found' });
+    }
     const who = userOf(req);
     if (path === '/items') {
       if (!who) return reply(res, 401, { error: 'unauthorized' });
@@ -59,4 +74,4 @@ createServer(async (req, res) => {
   } catch (e) {
     reply(res, 500, { error: String(e.stack) }); // leaks the stack
   }
-}).listen(Number(port), '127.0.0.1', () => console.log(`vulnerable on ${port}`));
+}).listen(Number(port), '127.0.0.1', function listening() { console.log(`vulnerable on ${this.address().port}`); });

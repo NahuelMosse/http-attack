@@ -1,5 +1,5 @@
-// The same items API as vulnerable-server.mjs, with each defect fixed. http-attack.mjs must report nothing.
-// node fixed-server.mjs <port> <sqlite-file | :memory:>   Users: "Authorization: Bearer alice" and "Bearer bob".
+// The same API as vulnerable-server.mjs, with each defect fixed. http-attack must report nothing.
+// node fixed-server.mjs <port | 0> <sqlite-file | :memory:>   Users: "Authorization: Bearer alice" and "Bearer bob".
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 const [port, file] = process.argv.slice(2);
 const db = new DatabaseSync(file);
 db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL');
-db.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, owner TEXT, name TEXT, email TEXT UNIQUE); CREATE TABLE IF NOT EXISTS audit (at TEXT)');
+db.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, owner TEXT, name TEXT, email TEXT UNIQUE); CREATE TABLE IF NOT EXISTS audit (at TEXT); CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, owner TEXT, title TEXT UNIQUE)');
 
 const BODY_LIMIT = 64 * 1024;
 const MAX_PAGE = 100;
@@ -52,16 +52,20 @@ const handle = async (req, res) => {
   try { path = decodeURIComponent(rawPath); } catch { throw new HttpError(400, { error: 'bad path' }); }
   const query = new URLSearchParams(rawQuery);
   if (path === '/') return reply(res, 200, { ok: true });
-  const m = path.match(/^\/items(?:\/([1-9][0-9]{0,15}))?$/);
+  const m = path.match(/^\/(items|notes)(?:\/([1-9][0-9]{0,15}))?$/);
   if (!m) throw new HttpError(404, { error: 'not found' });
-  const allow = m[1] ? 'GET, DELETE' : 'GET, POST';
+  const [, table, id] = m;
+  const allow = table === 'notes' ? (id ? 'GET' : 'POST') : (id ? 'GET, HEAD, DELETE' : 'GET, HEAD, POST');
+  if (req.method === 'OPTIONS') return reply(res, 204, undefined, { allow: `${allow}, OPTIONS` });
   if (!allow.split(', ').includes(req.method)) throw new HttpError(405, { error: 'method not allowed' }, { allow });
+  // A write from another origin is refused before anything else looks at it (CSRF).
+  if (req.headers.origin !== undefined && req.headers.origin !== `http://${req.headers.host}`) throw new HttpError(403, { error: 'forbidden origin' });
   const who = userOf(req);
   if (!who) throw new HttpError(401, { error: 'unauthorized' }, { 'www-authenticate': 'Bearer' });
-  if (m[1]) {
-    const item = db.prepare('SELECT id, name, email FROM items WHERE id = ? AND owner = ?').get(Number(m[1]), who);
+  if (id) {
+    const item = db.prepare(`SELECT * FROM ${table} WHERE id = ? AND owner = ?`).get(Number(id), who);
     if (!item) throw new HttpError(404, { error: 'not found' });
-    if (req.method === 'GET') return reply(res, 200, item);
+    if (req.method !== 'DELETE') return reply(res, 200, table === 'notes' ? { id: item.id, title: item.title } : { id: item.id, name: item.name, email: item.email });
     db.prepare('DELETE FROM items WHERE id = ? AND owner = ?').run(item.id, who);
     return reply(res, 204);
   }
@@ -73,13 +77,18 @@ const handle = async (req, res) => {
     return reply(res, 200, rows);
   }
   const b = await readJson(req);
-  if (!b || typeof b !== 'object' || typeof b.name !== 'string' || typeof b.email !== 'string' || !b.name.trim()) throw new HttpError(400, { error: 'invalid' });
   try {
     db.prepare('INSERT INTO audit VALUES (?)').run(new Date().toISOString());
+    if (table === 'notes') {
+      if (!b || typeof b !== 'object' || typeof b.title !== 'string' || !b.title.trim()) throw new HttpError(400, { error: 'invalid' });
+      const { lastInsertRowid } = db.prepare('INSERT INTO notes (owner, title) VALUES (?, ?)').run(who, b.title.trim());
+      return reply(res, 201, { id: Number(lastInsertRowid), title: b.title.trim() }, { location: `/notes/${Number(lastInsertRowid)}` });
+    }
+    if (!b || typeof b !== 'object' || typeof b.name !== 'string' || typeof b.email !== 'string' || !b.name.trim()) throw new HttpError(400, { error: 'invalid' });
     const { lastInsertRowid } = db.prepare('INSERT INTO items (owner, name, email) VALUES (?, ?, ?)').run(who, b.name.trim(), b.email);
-    const id = Number(lastInsertRowid);
-    return reply(res, 201, { id, name: b.name.trim(), email: b.email }, { location: `/items/${id}` });
-  } catch (e) { throw dbError(e); }
+    const newId = Number(lastInsertRowid);
+    return reply(res, 201, { id: newId, name: b.name.trim(), email: b.email }, { location: `/items/${newId}` });
+  } catch (e) { throw e instanceof HttpError ? e : dbError(e); }
 };
 
 const server = createServer((req, res) => {
@@ -103,4 +112,4 @@ server.on('clientError', (err, socket) => {
 });
 server.requestTimeout = 10_000;
 server.headersTimeout = 5_000;
-server.listen(Number(port), '127.0.0.1', () => console.log(`fixed on ${port}`));
+server.listen(Number(port), '127.0.0.1', () => console.log(`fixed on ${server.address().port}`));
