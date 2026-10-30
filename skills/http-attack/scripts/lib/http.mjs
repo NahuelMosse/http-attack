@@ -5,16 +5,27 @@ export const is2xx = (s) => s >= 200 && s < 300;
 export const is4xx = (s) => s >= 400 && s < 500;
 export const is5xx = (s) => s >= 500;
 
+// A login page is a Location with a whole path segment that names one: /login, /accounts/sign-in, /auth/start. Segments are
+// compared whole, so /authors/3 and /processors are not login pages.
+const LOGIN_SEGMENTS = new Set(['login', 'log-in', 'log_in', 'logon', 'signin', 'sign-in', 'sign_in', 'sso', 'auth', 'authenticate']);
+export const isLoginLocation = (location) => {
+  if (!location) return false;
+  try {
+    return new URL(location, 'http://local').pathname.split('/').some((segment) => LOGIN_SEGMENTS.has(decodeURIComponent(segment).toLowerCase().replace(/\.[a-z]+$/, '')));
+  } catch { return false; }
+};
+
 // Access was granted: a 2xx, or a redirect that does not lead to a login page (a 303 to the created item is a grant).
-const LOGIN_PAGE = /login|log-in|signin|sign-in|auth|sso/i;
-export const granted = (res) => is2xx(res.s) || (res.s >= 300 && res.s < 400 && !LOGIN_PAGE.test(res.headers?.location ?? ''));
+export const granted = (res) => is2xx(res.s) || (res.s >= 300 && res.s < 400 && !isLoginLocation(res.headers?.location));
 
 const BODY_CAP = 200_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const RAW_TIMEOUT_MS = 3000;
 const STREAM_TICK_MS = 5;
 
-const ALWAYS_CREDENTIAL = ['authorization', 'cookie', 'x-api-key'];
+const ID_SEGMENT = /\/(?:\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{12,})(?=\/|$)/gi;
+
+const ALWAYS_CREDENTIAL =['authorization', 'cookie', 'x-api-key'];
 
 const bareHost = (hostname) => hostname.replace(/^\[|\]$/g, '');
 
@@ -24,24 +35,43 @@ export function createClient(base, opts) {
   const port = Number(base.port || 80);
   const credentialNames = [...ALWAYS_CREDENTIAL, ...opts.authHeaderNames];
   const withoutCredentials = (h) => Object.fromEntries(Object.entries(h).filter(([k]) => !credentialNames.includes(k)));
-  const misses = new Map(); // route => { headers, statuses }: responses that lack a common header, by route
+  const misses = new Map(); // "METHOD path" => { headers, statuses }: responses that lack a common header
 
-  // The route of a request: the query is dropped and numeric ids become {id}, so the key is the same between runs.
-  const routeOf = (method, path) => `${method} ${path.split('?')[0].replace(/\/\d+(?=\/|$)/g, '/{id}')}`;
   const noteHeaders = (method, path, status, headers) => {
     const missing = opts.common.filter((h) => headers?.[h] === undefined);
     if (!missing.length) return;
-    const entry = misses.get(routeOf(method, path)) ?? { headers: new Set(), statuses: new Set() };
+    const key = `${method} ${path.split('?')[0]}`;
+    const entry = misses.get(key) ?? { method, path: path.split('?')[0], headers: new Set(), statuses: new Set() };
     missing.forEach((h) => entry.headers.add(h));
     entry.statuses.add(status);
-    misses.set(routeOf(method, path), entry);
+    misses.set(key, entry);
+  };
+
+  // The misses grouped by route, so one defect is one id however many ids the paths carried: a path that fits the item
+  // template is that template, else numeric, UUID and long hex segments become {id}.
+  const missesByRoute = (itemTemplate) => {
+    const fits = itemTemplate && new RegExp(`^${itemTemplate.split('?')[0].split(/\{[^}]*\}/).map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^/]+')}$`);
+    const routeOf = ({ method, path }) => (fits?.test(path) ? `${method} ${itemTemplate.split('?')[0]}` : `${method} ${path.replace(ID_SEGMENT, '/{id}')}`);
+    const routes = new Map();
+    for (const entry of misses.values()) {
+      const route = routeOf(entry);
+      const group = routes.get(route) ?? { headers: new Set(), statuses: new Set() };
+      entry.headers.forEach((h) => group.headers.add(h));
+      entry.statuses.forEach((s) => group.statuses.add(s));
+      routes.set(route, group);
+    }
+    return routes;
   };
 
   // node:http, because fetch cannot send a path starting with // nor stream a slow body.
-  // auth: 'a' (the default headers), 'none' (credentials removed), 'b' (the other user's credentials).
+  // auth: 'a' (the default headers), 'none' (credentials removed), 'b' (the other user's credentials),
+  // 'cookie' (only the session cookie, as a browser sends it: no token or API key header).
   const send = (method, path, { body, type, headers = {}, auth = 'a', common = true } = {}) => new Promise((done) => {
     const data = body === undefined ? null : Buffer.isBuffer(body) ? body : Buffer.from(body);
-    const creds = auth === 'b' ? { ...withoutCredentials(opts.headers), ...opts.otherHeaders } : auth === 'none' ? withoutCredentials(opts.headers) : opts.headers;
+    const cookie = opts.headers.cookie === undefined ? {} : { cookie: opts.headers.cookie };
+    const creds = auth === 'b' ? { ...withoutCredentials(opts.headers), ...opts.otherHeaders }
+      : auth === 'none' ? withoutCredentials(opts.headers)
+        : auth === 'cookie' ? { ...withoutCredentials(opts.headers), ...cookie } : opts.headers;
     const all = { ...creds, ...(data ? { 'content-length': data.length, ...(type ? { 'content-type': type } : {}) } : {}), ...headers };
     let settled = false;
     const settle = (v) => { if (!settled) { settled = true; done(v); } };
@@ -100,6 +130,6 @@ export function createClient(base, opts) {
     socket.on('close', () => finish(data.length ? parse(data.toString('latin1')) : { kind: 'closed' }));
   });
 
-  return { base, host, port, send, alive, stream, raw, misses, withoutCredentials, noteHeaders,
+  return { base, host, port, send, alive, stream, raw, misses, missesByRoute, withoutCredentials, noteHeaders,
     hasCredentials: () => Object.keys(opts.headers).some((k) => credentialNames.includes(k)) };
 }

@@ -76,6 +76,8 @@ test('a malformed config exits 2: unknown key, ignore without a reason, unknown 
     [{ routes: { '/a': { idempotentCreate: true, reason: ' ' } } }, /needs a non-empty "reason"/],
     [{ faultRestore: 'x' }, /needs "faultCmd"/],
     [{ ignore: [{ id: 'not-a-rule:x', reason: 'r' }] }, /does not start with a known rule/],
+    [{ ignore: [{ id: 'not-run', reason: 'r' }] }, /name the probe/],
+    [{ ignore: [{ id: 'not-run:*', reason: 'r' }] }, /name the probe/],
     [{ routes: { '/a': { invalidUtf8: 'maybe' } } }, /reject.*replace/],
   ]) {
     const r = await runCli([URL_, '--config', writeTemp(dir, 'c.json', JSON.stringify(obj))]);

@@ -39,8 +39,10 @@ export async function legitWrite(run, w) {
   if (p.error) { run.notRun(spec, p.error); return { ok: false }; }
   const res = await run.client.send(w.method, w.path, { body: p.text, type: p.type });
   if (await run.transportFault(res, spec, '2xx')) return { ok: false };
-  if (res.s >= 400) {
-    run.notRun(spec, `the legitimate request answered ${res.s} (${snippet(res.text)}): every other row of this write is unreliable until it succeeds`);
+  if (!granted(res)) {
+    run.notRun(spec, res.s >= 300
+      ? `the legitimate request was redirected to login (${res.headers.location}): the credentials do not work, so every other row of this write is unreliable`
+      : `the legitimate request answered ${res.s} (${snippet(res.text)}): every other row of this write is unreliable until it succeeds`);
     return { ok: false, res };
   }
   run.pass(spec, res.s, '2xx');
@@ -95,7 +97,7 @@ export async function accessProbes(run, w, legit) {
   if (!is2xx(own.s)) { run.notRun(idor, `user A cannot read the item it created (${own.s ?? own.err}): the ownership probes would prove nothing`); return; }
   const p = wire(w, st);
   const bCreate = await client.send(w.method, w.path, { body: p.text, type: p.type, auth: 'b' });
-  const bItem = bCreate.s !== null && bCreate.s < 400 ? itemUrlOf(bCreate, { base: client.base, itemPath: run.itemPath }) : null;
+  const bItem = bCreate.s !== null && granted(bCreate) ? itemUrlOf(bCreate, { base: client.base, itemPath: run.itemPath }) : null;
   const bOwn = bItem ? await client.send('GET', bItem, { auth: 'b' }) : null;
   if (!bOwn || !is2xx(bOwn.s)) {
     run.notRun(idor, `user B's credentials cannot create and read their own item (create ${bCreate.s ?? bCreate.err}${bOwn ? `, read ${bOwn.s}` : ''}): a 401/403 below would be a bad token, not ownership`);
@@ -144,7 +146,7 @@ export async function csrfProbes(run, w) {
     const target = `${w.method} ${w.path}`;
     const s = { group: 'csrf', probe: `origin-${tag}`, target, name: `${target} ${label}` };
     const p = wire(w, st);
-    const attempt = () => client.send(w.method, w.path, { body: p.text, type: p.type, headers });
+    const attempt = () => client.send(w.method, w.path, { body: p.text, type: p.type, headers, auth: 'cookie' });
     // A server that refuses early may reset the connection while the body is still being sent: one repeat before a drop is judged.
     let r = await attempt();
     if (r.s === null || r.truncated) r = await attempt();

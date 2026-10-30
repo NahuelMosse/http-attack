@@ -1,6 +1,7 @@
 // Throwaway in-memory servers, each with one behaviour that a probe must treat correctly. Every option is off by default,
 // which gives a well-behaved API: `GET/POST /items` (bearer "alice" or "bob"), `GET /items/:id`, and `GET /health`.
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 
 const TOKENS = { 'Bearer alice': 'alice', 'Bearer bob': 'bob' };
@@ -13,7 +14,9 @@ export async function startQuirkServer(q = {}) {
   const requests = [];
   const json = (res, s, body, extra = {}) => {
     if (res.headersSent) return;
-    res.writeHead(s, { 'content-type': 'application/json', 'x-request-id': 'r', 'cache-control': 'no-store', ...extra });
+    const headers = { 'content-type': 'application/json', 'x-request-id': 'r', 'cache-control': 'no-store', ...extra };
+    if (q.bareItems && /^\/items\/[^/?]+/.test(res.req.url)) delete headers['x-request-id']; // item routes answer without the request id
+    res.writeHead(s, headers);
     res.end(body === undefined ? '' : JSON.stringify(body));
   };
   const readBody = (req) => (req.cachedBody ??= new Promise((done) => { const parts = []; let size = 0; req.on('data', (d) => { size += d.length; if (q.noLimit || size < (q.keep ?? 1 << 20)) parts.push(d); }); req.on('end', () => { req.overflow = size >= (q.keep ?? 1 << 20) && !q.noLimit; done(Buffer.concat(parts)); }); }));
@@ -36,6 +39,8 @@ export async function startQuirkServer(q = {}) {
       if (q.openWrite && path === '/open' && req.method === 'POST') { await readBody(req); return json(res, 201, { id: ++seq }, { location: `/open/${seq}` }); }
       if (q.faultFile && existsSync(q.faultFile) && req.method === 'POST') return q.faultIgnored ? json(res, 201, { id: ++seq }) : json(res, 500, { error: 'internal' });
 
+      // Token-authenticated requests skip the CSRF check (Django REST framework); cookie-only requests from a foreign origin are refused.
+      if (q.tokenSkipsCsrf && req.method === 'POST' && !req.headers.authorization && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'CSRF failed' });
       if (q.csrf422 && req.method === 'POST' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 422, { error: 'invalid authenticity token' });
       if (q.requireQ && path === '/items' && req.method === 'GET' && url.searchParams.get('q') === null) return json(res, 400, { error: 'q is required' });
       if (q.noHead && req.method === 'HEAD') { res.writeHead(405, q.noHead === 'allow' ? { allow: 'GET, POST' } : {}); return res.end(); }
@@ -82,7 +87,7 @@ export async function startQuirkServer(q = {}) {
           const f = q.nested ? b?.item : q.jsonApi ? b?.data?.attributes : b;
           if (!f || typeof f.name !== 'string' || typeof f.email !== 'string') return json(res, 400, { error: 'invalid' });
           if (items.some((i) => i.email === f.email)) return json(res, 409, { error: 'exists' });
-          const it = { id: ++seq, owner: who, name: f.name, email: f.email };
+          const it = { id: q.uuid ? randomUUID() : ++seq, owner: who, name: f.name, email: f.email };
           items.push(it);
           return json(res, 201, it, q.noLocation ? {} : { location: `/items/${it.id}` });
         }

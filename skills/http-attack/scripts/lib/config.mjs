@@ -49,6 +49,7 @@ const checkIgnore = (file, entry, i) => {
   if (typeof entry.reason !== 'string' || !entry.reason.trim()) fail(file, `ignore[${i}] ("${entry.id}") needs a non-empty "reason": a suppression without a reason is not accepted.`);
   const rule = entry.id.split(':')[0];
   if (!(rule in RULES)) fail(file, `ignore[${i}]: "${entry.id}" does not start with a known rule (known: ${Object.keys(RULES).join(', ')}).`);
+  if (rule === 'not-run' && !/^not-run:[^*:]/.test(entry.id)) fail(file, `ignore[${i}]: "${entry.id}" would hide every probe that could not run: name the probe, as "not-run:<probe>" or "not-run:<probe>:<target>".`);
 };
 
 export function loadConfig(file, { cwd = process.cwd(), env = process.env } = {}) {
@@ -123,7 +124,8 @@ export const routeSettings = (config, flags, method, path) => {
 
 export const unusedRoutes = (config) => Object.keys(config.routes).filter((k) => !config.usedRoutes.has(k));
 
-const matches = (pattern, row) => pattern === row.id || pattern === row.rule
+// A pattern is an id, a rule, "<rule>:<probe>" (every target of that probe) or an id prefix ending in *.
+const matches = (pattern, row) => pattern === row.id || pattern === row.rule || row.id.startsWith(`${pattern}:`)
   || (pattern.endsWith('*') && row.id.startsWith(pattern.slice(0, -1)));
 
 // A suppression keeps the row, marked with its reason; it no longer counts as a finding or a gap.

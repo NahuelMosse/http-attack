@@ -4,8 +4,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ALICE, BOB, ITEM, SKILL, attack, tempDir, writeTemp } from './helpers/cli.mjs';
+import { ALICE, BOB, ITEM, SKILL, attack, runCli, tempDir, writeTemp } from './helpers/cli.mjs';
 import { startQuirkServer } from './helpers/quirk-server.mjs';
+import { granted } from '../skills/http-attack/scripts/lib/http.mjs';
 
 const withServer = async (quirks, fn) => {
   const s = await startQuirkServer(quirks);
@@ -234,6 +235,60 @@ test('the config file suppresses with a reason and reports the counts; unused ig
   assert.equal(r.report.schemaVersion, 1);
   for (const row of r.report.rows) assert.equal(typeof row.got, 'string');
   assert.ok(readFileSync(join(dir, 'http-attack.config.json'), 'utf8').includes('reason'));
+}));
+
+test('"not-run:<probe>" suppresses the NOT RUN rows of that probe and no other', () => withServer({}, async (s) => {
+  const ignore = [{ id: 'not-run:legit-write', reason: 'the create needs a field this run does not know' }];
+  const r = await attack(s.url, [...ALICE, '--write', 'POST /items {"nope":1}', ...config(tempDir(), { ignore })]);
+  assert.equal(r.row('not-run:legit-write:POST /items')?.verdict, 'suppressed');
+  assert.equal(r.row('not-run:input-probes:POST /items')?.verdict, 'not-run');
+}));
+
+test('a redirect is a refusal only when a whole path segment of its Location names a login page', () => {
+  const redirect = (location) => granted({ s: 302, headers: { location } });
+  for (const login of ['/login', '/login?next=/authors/3', '/accounts/sign-in', 'https://idp.example/sso/start', '/auth/start', '/Login.html']) assert.equal(redirect(login), false, login);
+  for (const open of ['/authors/3', '/lessons/4', '/processors', '/items/7', '/items?next=/login']) assert.equal(redirect(open), true, open);
+  assert.equal(granted({ s: 302, headers: {} }), true, 'a redirect without a Location is not a login redirect');
+  assert.equal(granted({ s: 401, headers: {} }), false);
+});
+
+test('credentials that are redirected to login make the legitimate write NOT RUN, not a created item', () => withServer({ loginRedirect: true }, async (s) => {
+  const r = await attack(s.url, ['--header', 'Authorization: Bearer nobody', ...BOB, '--write', ITEM]);
+  assert.match(r.row('not-run:legit-write:POST /items')?.evidence ?? '', /redirected to login.*credentials do not work/);
+  assert.deepEqual(r.findings.filter((id) => /^(unauthenticated-access|idor):/.test(id)), [], 'no unauthenticated-access or idor finding is built on a redirect');
+  assert.equal(r.code, 2);
+}));
+
+test("user B's credentials redirected to login on create make the ownership probes NOT RUN", () => withServer({ loginRedirect: true }, async (s) => {
+  const r = await attack(s.url, [...ALICE, '--other-header', 'Authorization: Bearer nobody', '--write', ITEM]);
+  assert.ok(r.row('not-run:idor:POST /items'), 'B could not create: ownership was not tested');
+  assert.ok(!r.findings.some((id) => id.startsWith('idor:')));
+}));
+
+test('--persist-save with credentials redirected to login saves nothing and exits 2', () => withServer({ loginRedirect: true }, async (s) => {
+  const file = join(tempDir(), 'state.json');
+  const r = await runCli([s.url, '--header', 'Authorization: Bearer nobody', '--write', ITEM, '--persist-save', file]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /redirected to login/);
+  assert.equal(existsSync(file), false);
+}));
+
+test('CSRF probes send the cookie only: a Bearer token next to it would skip the check', () => withServer({ tokenSkipsCsrf: true }, async (s) => {
+  const r = await attack(s.url, [...ALICE, '--header', 'Cookie: session=alice', '--write', ITEM, '--csrf']);
+  assert.ok(!r.findings.some((id) => id.startsWith('csrf:')), r.findings.join(', '));
+  assert.equal(r.row('ok:origin-another-site:POST /items')?.verdict, 'pass');
+  const named = await attack(s.url, ['--header', 'X-Token: alice', '--auth-header-name', 'X-Token', '--header', 'Cookie: session=alice', '--write', ITEM, '--csrf']);
+  const sent = s.requests.filter((q) => q.headers.origin && q.headers['x-token'] !== undefined);
+  assert.deepEqual(sent, [], 'a configured auth header is not sent with a CSRF probe');
+  assert.equal(named.row('ok:origin-another-site:POST /items')?.verdict, 'pass');
+}));
+
+test('headers-missing is one finding per route template, whatever the ids in the paths', () => withServer({ uuid: true, bareItems: true }, async (s) => {
+  const r = await attack(s.url, [...ALICE, ...BOB, '--write', ITEM, '--common-headers', 'X-Request-Id']);
+  const missing = r.findings.filter((id) => id.startsWith('headers-missing:'));
+  assert.deepEqual(missing.sort(), ['headers-missing:common-headers:DELETE /items/{id}', 'headers-missing:common-headers:GET /items/{id}']);
+  const again = await attack(s.url, [...ALICE, ...BOB, '--write', ITEM, '--common-headers', 'X-Request-Id']);
+  assert.deepEqual(again.findings.filter((id) => id.startsWith('headers-missing:')).sort(), missing, 'the same ids on a second run with new UUIDs');
 }));
 
 test('a CSRF probe whose connection is reset once is repeated, not reported as a dropped connection', () => withServer({ resetFirstOrigin: true }, async (s) => {

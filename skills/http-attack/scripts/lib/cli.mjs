@@ -66,11 +66,12 @@ async function runAll(run) {
 
   if (opts.common.length) {
     const wanted = `every response carries ${opts.common.join(', ')}`;
-    for (const [route, { headers, statuses }] of [...client.misses].sort(([x], [y]) => x.localeCompare(y))) {
+    const missing = client.missesByRoute(run.itemTemplate);
+    for (const [route, { headers, statuses }] of [...missing].sort(([x], [y]) => x.localeCompare(y))) {
       const spec = { group: 'headers', probe: 'common-headers', target: route, name: `${route}: ${wanted}` };
       run.fail('headers-missing', spec, [...statuses].join(','), wanted, `answered ${[...statuses].join(', ')} without ${[...headers].join(', ')}`);
     }
-    if (!client.misses.size) run.pass({ group: 'headers', probe: 'common-headers', target: 'responses', name: wanted }, 'all', wanted);
+    if (!missing.size) run.pass({ group: 'headers', probe: 'common-headers', target: 'responses', name: wanted }, 'all', wanted);
   }
 }
 
