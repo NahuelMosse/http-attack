@@ -74,6 +74,16 @@ export function withField(p, make) {
   return JSON.stringify(value);
 }
 
+// Every string field of the wire body as a path (JSON only): wrong-type probes try them all.
+export const stringFields = (p) => (p.value && !p.form ? stringLeaves(p.value) : []);
+
+// The wire body with one string field replaced by a non-string value (JSON only).
+export function withValueAt(p, path, replacement) {
+  const value = JSON.parse(p.text);
+  setAt(value, path, replacement);
+  return JSON.stringify(value);
+}
+
 // The wire body with the field replaced by a non-string value (JSON only).
 export function withValue(p, replacement) {
   if (!p.path || p.form) return null;

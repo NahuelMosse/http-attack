@@ -1,5 +1,5 @@
 // The same API as vulnerable-server.mjs, with each defect fixed. http-attack must report nothing.
-// node fixed-server.mjs <port | 0> <sqlite-file | :memory:>   Users: "Authorization: Bearer alice" and "Bearer bob".
+// node fixed-server.mjs <port | 0> <sqlite-file | :memory:>   Users: "Authorization: Bearer alice" / "Bearer bob", or "Cookie: session=alice" / "session=bob".
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -18,7 +18,8 @@ const reply = (res, status, body, extra = {}) => {
   res.end(body === undefined ? '' : JSON.stringify(body));
 };
 class HttpError extends Error { constructor(status, body, extra) { super(body.error); Object.assign(this, { status, body, extra }); } }
-const userOf = (req) => ({ 'Bearer alice': 'alice', 'Bearer bob': 'bob' })[req.headers.authorization];
+// Bearer tokens or a session cookie (session=alice / session=bob): the cookie is what the CSRF probes attack.
+const userOf = (req) => ({ 'Bearer alice': 'alice', 'Bearer bob': 'bob' })[req.headers.authorization] ?? ({ 'session=alice': 'alice', 'session=bob': 'bob' })[req.headers.cookie];
 
 // The media type is checked before reading; bytes are counted while reading; decoding is strict.
 const readJson = (req) => new Promise((done, fail) => {

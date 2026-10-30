@@ -25,14 +25,21 @@ const decodeChunked = (text) => {
   }
 };
 
-const parseResponse = (text) => {
-  const m = text.match(/^HTTP\/1\.[01] (\d{3})/);
+// The response parsed from the bytes read until the server closed the socket. A response whose body is shorter than its
+// Content-Length, or whose chunked body has no terminating chunk, was cut: `complete` is false.
+const parseResponse = (buf) => {
+  const end = buf.indexOf('\r\n\r\n');
+  const head = buf.subarray(0, end < 0 ? buf.length : end).toString('latin1');
+  const m = head.match(/^HTTP\/1\.[01] (\d{3})/);
   if (!m) return null;
-  const [head, ...bodyParts] = text.split('\r\n\r\n');
   const headers = Object.fromEntries(head.split('\r\n').slice(1).filter((l) => l.includes(':'))
     .map((l) => [l.slice(0, l.indexOf(':')).trim().toLowerCase(), l.slice(l.indexOf(':') + 1).trim()]));
-  const body = bodyParts.join('\r\n\r\n');
-  return { s: Number(m[1]), headers, text: headers['transfer-encoding'] === 'chunked' ? decodeChunked(body) : body };
+  const body = end < 0 ? Buffer.alloc(0) : buf.subarray(end + 4);
+  const chunked = headers['transfer-encoding'] === 'chunked';
+  const length = headers['content-length'] === undefined ? null : Number(headers['content-length']);
+  const complete = end >= 0 && (chunked ? /(^|\r\n)0\r\n\r\n$/.test(body.toString('latin1')) : length === null || body.length >= length);
+  const text = body.toString('utf8');
+  return { s: Number(m[1]), headers, text: chunked ? decodeChunked(text) : text, complete };
 };
 
 // The identity of the item a success created: its Location, else the id in the JSON body.
@@ -62,10 +69,11 @@ export async function raceProbe(run, u) {
     sock.on('data', (d) => chunks.push(d));
     sock.on('error', (e) => { err ??= e.code ?? e.message; ready({ sock: null, settled }); });
     sock.on('close', () => {
-      const text = Buffer.concat(chunks).toString('utf8');
-      const parsed = parseResponse(text);
-      if (!parsed) return settle({ s: null, err: err ?? (text ? 'BAD_RESPONSE' : 'EMPTY_RESPONSE') });
-      client.noteHeaders(`${u.method} ${u.path} -> ${parsed.s}`, parsed.headers);
+      const bytes = Buffer.concat(chunks);
+      const parsed = parseResponse(bytes);
+      if (!parsed) return settle({ s: null, err: err ?? (bytes.length ? 'BAD_RESPONSE' : 'EMPTY_RESPONSE') });
+      if (!parsed.complete) return settle({ s: null, err: err ?? 'TRUNCATED_RESPONSE' });
+      client.noteHeaders(u.method, u.path, parsed.s, parsed.headers);
       settle(parsed);
     });
     sock.on('connect', () => sock.write(bytes.subarray(0, -1), () => ready({ sock, settled, last: bytes.subarray(-1) })));

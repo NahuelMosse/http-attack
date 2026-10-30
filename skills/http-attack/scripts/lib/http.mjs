@@ -5,6 +5,10 @@ export const is2xx = (s) => s >= 200 && s < 300;
 export const is4xx = (s) => s >= 400 && s < 500;
 export const is5xx = (s) => s >= 500;
 
+// Access was granted: a 2xx, or a redirect that does not lead to a login page (a 303 to the created item is a grant).
+const LOGIN_PAGE = /login|log-in|signin|sign-in|auth|sso/i;
+export const granted = (res) => is2xx(res.s) || (res.s >= 300 && res.s < 400 && !LOGIN_PAGE.test(res.headers?.location ?? ''));
+
 const BODY_CAP = 200_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const RAW_TIMEOUT_MS = 3000;
@@ -20,11 +24,17 @@ export function createClient(base, opts) {
   const port = Number(base.port || 80);
   const credentialNames = [...ALWAYS_CREDENTIAL, ...opts.authHeaderNames];
   const withoutCredentials = (h) => Object.fromEntries(Object.entries(h).filter(([k]) => !credentialNames.includes(k)));
-  const misses = new Map(); // "METHOD path -> status" => missing header names
+  const misses = new Map(); // route => { headers, statuses }: responses that lack a common header, by route
 
-  const noteHeaders = (what, headers) => {
+  // The route of a request: the query is dropped and numeric ids become {id}, so the key is the same between runs.
+  const routeOf = (method, path) => `${method} ${path.split('?')[0].replace(/\/\d+(?=\/|$)/g, '/{id}')}`;
+  const noteHeaders = (method, path, status, headers) => {
     const missing = opts.common.filter((h) => headers?.[h] === undefined);
-    if (missing.length && !misses.has(what)) misses.set(what, missing);
+    if (!missing.length) return;
+    const entry = misses.get(routeOf(method, path)) ?? { headers: new Set(), statuses: new Set() };
+    missing.forEach((h) => entry.headers.add(h));
+    entry.statuses.add(status);
+    misses.set(routeOf(method, path), entry);
   };
 
   // node:http, because fetch cannot send a path starting with // nor stream a slow body.
@@ -41,7 +51,7 @@ export function createClient(base, opts) {
       res.setEncoding('utf8');
       res.on('data', (d) => { if (text.length < BODY_CAP) text += d; });
       const result = (extra) => ({ s: res.statusCode, headers: res.headers, text, ...extra });
-      res.on('end', () => { if (common) noteHeaders(`${method} ${path} -> ${res.statusCode}`, res.headers); settle(result()); });
+      res.on('end', () => { if (common) noteHeaders(method, path, res.statusCode, res.headers); settle(result()); });
       // Headers sent, then the connection cut: the answer is the status that was seen, flagged incomplete.
       res.on('aborted', () => settle(result({ truncated: true, err: 'ECONNRESET' })));
       res.on('close', () => settle(result({ truncated: !res.complete, err: res.complete ? undefined : 'ECONNRESET' })));

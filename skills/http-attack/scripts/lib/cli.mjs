@@ -65,10 +65,12 @@ async function runAll(run) {
   if (opts.faultSqlite || opts.faultCmd) await faultProbe(run, ready[0]);
 
   if (opts.common.length) {
-    const spec = { group: 'headers', probe: 'common-headers', target: 'responses', name: `every response carries ${opts.common.join(', ')}` };
-    const listed = [...client.misses].slice(0, MAX_MISSING_LISTED).map(([what, missing]) => `${what} lacks ${missing.join(', ')}`);
-    if (listed.length) run.fail('headers-missing', spec, `${client.misses.size} responses`, spec.name, `${listed.join('; ')}${client.misses.size > listed.length ? `; and ${client.misses.size - listed.length} more` : ''}`);
-    else run.pass(spec, 'all', spec.name);
+    const wanted = `every response carries ${opts.common.join(', ')}`;
+    for (const [route, { headers, statuses }] of [...client.misses].sort(([x], [y]) => x.localeCompare(y))) {
+      const spec = { group: 'headers', probe: 'common-headers', target: route, name: `${route}: ${wanted}` };
+      run.fail('headers-missing', spec, [...statuses].join(','), wanted, `answered ${[...statuses].join(', ')} without ${[...headers].join(', ')}`);
+    }
+    if (!client.misses.size) run.pass({ group: 'headers', probe: 'common-headers', target: 'responses', name: wanted }, 'all', wanted);
   }
 }
 

@@ -1,5 +1,5 @@
 // A deliberately broken API, to prove that http-attack finds what it claims to find.
-// node vulnerable-server.mjs <port | 0> <sqlite-file | :memory:>   Users: "Authorization: Bearer alice" and "Bearer bob".
+// node vulnerable-server.mjs <port | 0> <sqlite-file | :memory:>   Users: "Authorization: Bearer alice" / "Bearer bob", or "Cookie: session=alice" / "session=bob".
 // Every defect below is one the script must report. Do not copy this code.
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -14,7 +14,8 @@ const reply = (res, status, body, extra = {}) => {
   res.writeHead(status, { 'content-type': 'application/json', 'x-request-id': randomUUID(), 'cache-control': 'no-store', ...extra });
   res.end(body === undefined ? '' : JSON.stringify(body));
 };
-const userOf = (req) => ({ 'Bearer alice': 'alice', 'Bearer bob': 'bob' })[req.headers.authorization];
+// Bearer tokens or a session cookie (session=alice / session=bob): the cookie is what the CSRF probes attack.
+const userOf = (req) => ({ 'Bearer alice': 'alice', 'Bearer bob': 'bob' })[req.headers.authorization] ?? ({ 'session=alice': 'alice', 'session=bob': 'bob' })[req.headers.cookie];
 const readAll = (req) => new Promise((done) => { const parts = []; req.on('data', (d) => parts.push(d)); req.on('end', () => done(Buffer.concat(parts).toString())); });
 
 // No 'clientError' handler: Node's parser answers malformed requests without the common headers.

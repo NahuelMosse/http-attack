@@ -4,7 +4,7 @@ import { ALICE, BOB, SKILL, runCli, tempDir } from './cli.mjs';
 
 // The one command both fixtures are attacked with: a fixed API must report nothing, the vulnerable one a known set.
 export const FIXTURE_ARGS = (db) => [
-  ...ALICE, ...BOB,
+  ...ALICE, ...BOB, '--header', 'Cookie: session=alice',
   '--write', 'POST /items {"name":"Ana","email":"ana@example.com"}',
   '--write', 'POST /notes {"title":"Hello"}',
   '--read', '/items?limit=10', '--search', '/items q',

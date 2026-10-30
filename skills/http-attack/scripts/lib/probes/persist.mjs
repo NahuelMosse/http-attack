@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { UsageError } from '../errors.mjs';
 import { is2xx } from '../http.mjs';
 import { wire } from '../body.mjs';
-import { itemUrlOf } from './auth.mjs';
+import { itemLabel, itemUrlOf } from './auth.mjs';
 
 const real = (p) => { try { return realpathSync(p); } catch { return p; } };
 
@@ -53,6 +53,6 @@ export async function persistVerify(run, file) {
   return {
     ok: same,
     message: `${same ? 'PASS' : 'FAIL critical'}  GET ${saved.item} after restart: ${now.s} (before: ${saved.status})${same ? '' : ' - expected the same status and body: the data is not durable'}`,
-    data: { mode: 'persist-verify', rule: 'not-durable', severity: 'critical', item: saved.item, status: now.s, savedStatus: saved.status },
+    data: { mode: 'persist-verify', ...(same ? {} : { id: `not-durable:persist-verify:GET ${itemLabel(saved.item)}`, rule: 'not-durable', severity: 'critical' }), item: saved.item, status: now.s, savedStatus: saved.status },
   };
 }

@@ -15,7 +15,7 @@ export async function startQuirkServer(q = {}) {
     res.writeHead(s, { 'content-type': 'application/json', 'x-request-id': 'r', 'cache-control': 'no-store', ...extra });
     res.end(body === undefined ? '' : JSON.stringify(body));
   };
-  const readBody = (req) => new Promise((done) => { const parts = []; let size = 0; req.on('data', (d) => { size += d.length; if (q.noLimit || size < (q.keep ?? 1 << 20)) parts.push(d); }); req.on('end', () => done(Buffer.concat(parts))); });
+  const readBody = (req) => (req.cachedBody ??= new Promise((done) => { const parts = []; let size = 0; req.on('data', (d) => { size += d.length; if (q.noLimit || size < (q.keep ?? 1 << 20)) parts.push(d); }); req.on('end', () => done(Buffer.concat(parts))); }));
   const unauthorized = (res) => (q.loginRedirect ? json(res, 302, undefined, { location: '/login' }) : json(res, 401, { error: 'unauthorized' }));
 
   const server = createServer(q.maxHeaderSize ? { maxHeaderSize: q.maxHeaderSize } : {}, async (req, res) => {
@@ -32,10 +32,13 @@ export async function startQuirkServer(q = {}) {
       if (q.repoFile && path === '/.git/config') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('[core]\n\tbare = false\n'); }
       if (q.publicRead && path === '/catalog') return json(res, 200, [{ id: 1, name: 'one' }]);
       if (q.openWrite && path === '/open' && req.method === 'POST') { await readBody(req); return json(res, 201, { id: ++seq }, { location: `/open/${seq}` }); }
-      if (q.faultFile && existsSync(q.faultFile) && req.method === 'POST') return json(res, 500, { error: 'internal' });
+      if (q.faultFile && existsSync(q.faultFile) && req.method === 'POST') return q.faultIgnored ? json(res, 201, { id: ++seq }) : json(res, 500, { error: 'internal' });
 
       if (q.csrf422 && req.method === 'POST' && req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 422, { error: 'invalid authenticity token' });
-      const who = q.authHeader ? (req.headers[q.authHeader] === 'alice-token' ? 'alice' : req.headers[q.authHeader] === 'bob-token' ? 'bob' : undefined) : TOKENS[req.headers.authorization];
+      if (q.requireQ && path === '/items' && req.method === 'GET' && url.searchParams.get('q') === null) return json(res, 400, { error: 'q is required' });
+      if (q.noHead && req.method === 'HEAD') { res.writeHead(405, q.noHead === 'allow' ? { allow: 'GET, POST' } : {}); return res.end(); }
+      if (q.dropBadJson && req.method === 'POST' && (await readBody(req)).toString() === '{"x":') return req.socket.destroy();
+      const who = q.authHeader ? (req.headers[q.authHeader] === 'alice-token' ? 'alice' : req.headers[q.authHeader] === 'bob-token' ? 'bob' : undefined) : (TOKENS[req.headers.authorization] ?? { 'session=alice': 'alice', 'session=bob': 'bob' }[req.headers.cookie]);
 
       if (path === '/things' && req.method === 'POST') { // POST that stores without a unique key, or idempotently
         if (!who) return unauthorized(res);

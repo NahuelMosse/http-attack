@@ -1,4 +1,4 @@
-import { is2xx } from '../http.mjs';
+import { granted, is2xx } from '../http.mjs';
 import { wire } from '../body.mjs';
 
 const snippet = (text) => text.replace(/\s+/g, ' ').slice(0, 120);
@@ -17,14 +17,17 @@ export function itemUrlOf(res, { base, itemPath }) {
 }
 
 // A stable label for an item URL: the id segment becomes {id}.
-export const itemLabel = (url, template) => (template && url.startsWith(template.split('{id}')[0]) ? template : url.split('?')[0].replace(/[^/]+$/, '{id}'));
+// The last path segment is the id, with or without a trailing slash: /items/37, /items/37/, /api/v1/items/37.
+const withIdSegment = (url) => url.split('?')[0].replace(/[^/]+(\/?)$/, '{id}$1');
+const lastSegment = (url) => url.split('?')[0].split('/').filter(Boolean).pop();
+export const itemLabel = (url, template) => (template && url.startsWith(template.split('{id}')[0]) ? template : withIdSegment(url));
 
 // The id-less template of an item route, learned from a created item's Location when --item-path was not given.
 export const inferTemplate = (url, res) => {
-  const last = url.split('?')[0].split('/').pop();
+  const last = lastSegment(url);
   let id;
   try { id = JSON.parse(res.text)?.id; } catch { /* no JSON body */ }
-  return last && (id === undefined || decodeURIComponent(last) === String(id)) ? url.split('?')[0].replace(/[^/]+$/, '{id}') : null;
+  return last && (id === undefined || decodeURIComponent(last) === String(id)) ? withIdSegment(url) : null;
 };
 
 // The legitimate create every other probe of this write depends on. { ok, res, item }.
@@ -56,7 +59,7 @@ export function notRunDependents(run, w, why) {
 const unauthenticated = async (run, spec, method, path, expected, payload = {}) => {
   const res = await run.client.send(method, path, { auth: 'none', ...payload });
   if (await run.transportFault(res, spec, expected)) return;
-  if (is2xx(res.s)) run.fail('unauthenticated-access', spec, res.s, expected);
+  if (granted(res)) run.fail('unauthenticated-access', spec, res.s, expected, res.s >= 300 ? `redirected to ${res.headers.location ?? '(no Location)'}, not to a login page` : undefined);
   else run.pass(spec, res.s, expected);
 };
 
@@ -74,16 +77,20 @@ export async function accessProbes(run, w, legit) {
       const p = wire(w, st);
       await unauthenticated(run, spec('write-without-credentials', `${target} without credentials`), w.method, w.path, '401 (or a redirect to login)', { body: p.text, type: p.type });
     }
-    if (legit.item) await unauthenticated(run, spec('item-without-credentials', `GET ${label} without credentials`, `GET ${label}`), 'GET', legit.item, '401 (or a redirect to login)');
+    if (legit.item) {
+      const itemSpec = spec('item-without-credentials', `GET ${label} without credentials`, `GET ${label}`);
+      if (run.settings('GET', legit.item).public) run.skipped(itemSpec, 'the item route is configured public');
+      else await unauthenticated(run, itemSpec, 'GET', legit.item, '401 (or a redirect to login)');
+    }
   } else if (!run.state.noCredentialsReported) {
     run.state.noCredentialsReported = true;
     run.notRun(spec('no-credentials', 'authentication probes', '*'),
       'no credentials were given (--header, --auth-env, --auth-header-name): the rows without credentials prove nothing. Suppress this row if the API is open by design');
   }
 
-  if (!Object.keys(opts.otherHeaders).length) return;
   const idor = spec('idor', `${target} ownership`);
-  if (!legit.item) { run.notRun(idor, 'the create answered no Location and --item-path was not given'); return; }
+  if (!Object.keys(opts.otherHeaders).length) { run.notRun(idor, 'no credentials for user B (--other-header or --other-auth-env): the ownership probes were skipped'); return; }
+  if (!legit.item) { run.notRun(idor, `the create answered no Location${opts.itemPath || run.itemPath ? ' and its body has no id for --item-path' : ' and --item-path was not given'}`); return; }
   const own = await client.send('GET', legit.item);
   if (!is2xx(own.s)) { run.notRun(idor, `user A cannot read the item it created (${own.s ?? own.err}): the ownership probes would prove nothing`); return; }
   const p = wire(w, st);
@@ -99,8 +106,13 @@ export async function accessProbes(run, w, legit) {
     const r = await client.send(m, legit.item, { auth: 'b' });
     const expected = '404 (or 403)';
     if (await run.transportFault(r, s, expected)) continue;
-    if (is2xx(r.s)) run.fail('idor', s, r.s, expected, "another user's credentials reach this object");
-    else run.pass(s, r.s, expected);
+    if (!granted(r)) { run.pass(s, r.s, expected); continue; }
+    if (m === 'DELETE') {
+      // A 2xx proves nothing unless the object is gone: some routes answer 2xx to any method and delete nothing.
+      const after = await client.send('GET', legit.item);
+      if (is2xx(after.s)) { run.pass(s, r.s, expected, `answered ${r.s} but the item still exists: nothing was deleted`); continue; }
+    }
+    run.fail('idor', s, r.s, expected, "another user's credentials reach this object");
   }
 }
 
@@ -118,6 +130,11 @@ export async function readsWithoutCredentials(run) {
 export async function csrfProbes(run, w) {
   const { client } = run;
   const st = run.settings(w.method, w.path);
+  if (!Object.hasOwn(run.opts.headers, 'cookie')) {
+    run.notRun({ group: 'csrf', probe: 'cookie-required', target: `${w.method} ${w.path}`, name: `${w.method} ${w.path} CSRF probes` },
+      '--csrf tests cookie authentication and no Cookie header was given: a browser does not attach a Bearer token to a cross-site request. Pass the session cookie with --header "Cookie: ..."');
+    return;
+  }
   const origins = [
     ['another-site', 'from another site', { origin: 'https://attacker.example', 'sec-fetch-site': 'cross-site' }],
     ['another-port', 'from another port of the same host', { origin: `http://${client.base.hostname}:${client.port + 1}`, 'sec-fetch-site': 'same-site' }],
@@ -130,8 +147,7 @@ export async function csrfProbes(run, w) {
     const r = await client.send(w.method, w.path, { body: p.text, type: p.type, headers });
     const expected = '403 (any 4xx): the Origin is not this app';
     if (await run.transportFault(r, s, expected)) continue;
-    const toLogin = r.s >= 300 && r.s < 400 && /login|sign-?in|auth/i.test(r.headers.location ?? '');
-    if (is2xx(r.s) || (r.s >= 300 && r.s < 400 && !toLogin)) run.fail('csrf', s, r.s, expected, r.s >= 300 ? `redirected to ${r.headers.location ?? '(no Location)'}: the write was accepted` : undefined);
+    if (granted(r)) run.fail('csrf', s, r.s, expected, r.s >= 300 ? `redirected to ${r.headers.location ?? '(no Location)'}: the write was accepted` : undefined);
     else if (r.s === 409) run.notRun(s, 'answered 409: the body was refused before the origin check, so the check was not reached');
     else run.pass(s, r.s, expected);
   }

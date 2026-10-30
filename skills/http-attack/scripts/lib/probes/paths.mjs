@@ -1,7 +1,8 @@
 import { is2xx } from '../http.mjs';
 
 const HUGE = ['9'.repeat(30), '-' + '9'.repeat(30), '1e3', ''];
-const PATH_PARAMS = [['huge-number', '9'.repeat(30)], ['negative', '-1'], ['letters', 'abc'], ['invalid-uuid', 'not-a-uuid'], ['percent', '%']];
+// Broken percent-encoding in the path is probed separately (`/%`), so it is not repeated here.
+const PATH_PARAMS = [['huge-number', '9'.repeat(30)], ['negative', '-1'], ['letters', 'abc'], ['invalid-uuid', 'not-a-uuid']];
 
 // Marker, regexp pairs: a hit on a 2xx that is not an HTML page means the file came back.
 const LEAKS = [
@@ -23,18 +24,23 @@ export async function pathProbes(run, { writes, itemTemplate }) {
     if (!(await run.transportFault(res, s, expected))) run.pass(s, res.s, expected);
   };
 
+  const seenPaths = new Set(); // path-level probes run once per path; the query only matters for the query-level ones
   for (const r of routes) {
     const [p, q] = r.split('?');
-    const target = `GET ${r}`;
-    const s = spec('double-slash', target, `GET /${p} (double slash)`);
-    const [slash, plain] = [await client.send('GET', '/' + p), await client.send('GET', p)];
-    if (!(await run.transportFault(slash, s, 'a 4xx or the same resource, never a 5xx: "//x" is a path, not a host'))) {
-      if (is2xx(slash.s) && (slash.s !== plain.s || shape(slash.text) !== shape(plain.text))) {
-        run.fail('double-slash-mismatch', s, slash.s, `the same answer as ${p} (${plain.s}) or a 4xx`, `//${p.slice(1)} answered something else than ${p}: it is likely parsed as a host`);
-      } else run.pass(s, slash.s, 'a 4xx or the same resource');
+    if (!seenPaths.has(p)) {
+      seenPaths.add(p);
+      const pathTarget = `GET ${p}`;
+      const s = spec('double-slash', pathTarget, `GET /${p} (double slash)`);
+      const [slash, plain] = [await client.send('GET', '/' + p), await client.send('GET', p)];
+      if (!(await run.transportFault(slash, s, 'a 4xx or the same resource, never a 5xx: "//x" is a path, not a host'))) {
+        if (is2xx(slash.s) && (slash.s !== plain.s || shape(slash.text) !== shape(plain.text))) {
+          run.fail('double-slash-mismatch', s, slash.s, `the same answer as ${p} (${plain.s}) or a 4xx`, `//${p.slice(1)} answered something else than ${p}: it is likely parsed as a host`);
+        } else run.pass(s, slash.s, 'a 4xx or the same resource');
+      }
+      const base = p.replace(/\/$/, '');
+      await noFiveHundred('percent-path', pathTarget, `GET ${base}/% (broken percent-encoding in the path)`, `${base}/%`, '400 or 404, never a 5xx');
     }
-    const base = p.replace(/\/$/, '');
-    await noFiveHundred('percent-path', target, `GET ${base}/% (broken percent-encoding in the path)`, `${base}/%`, '400 or 404, never a 5xx');
+    const target = `GET ${r}`;
     await noFiveHundred('percent-query', target, `GET ${p}?pct=%FF% (broken percent-encoding in the query)`, `${p}?${q ? `${q}&` : ''}pct=%FF%`, '400, never a 5xx');
     for (const [k] of [...new URLSearchParams(q ?? '')].filter(([, v]) => /^-?\d+$/.test(v))) {
       for (const huge of HUGE) {
@@ -61,15 +67,17 @@ export async function pathProbes(run, { writes, itemTemplate }) {
     const res = await client.send(m, r);
     const expected = '2xx, or 405 with Allow';
     if (await run.transportFault(res, s, expected)) continue;
+    // Both findings can apply to one answer: HEAD refused, and without an Allow header.
+    if (res.s === 405 && m === 'HEAD') run.fail('head-unsupported', s, 405, 'HEAD answered like GET without the body (RFC 9110 9.1)');
     if (res.s === 405 && !res.headers.allow) run.fail('missing-allow', s, 405, '405 must name the allowed methods in Allow (RFC 9110 15.5.6)');
-    else if (res.s === 405 && m === 'HEAD') run.fail('head-unsupported', s, 405, 'HEAD answered like GET without the body (RFC 9110 9.1)');
-    else run.pass(s, res.s, expected);
+    if (res.s !== 405 || (m === 'OPTIONS' && res.headers.allow)) run.pass(s, res.s, expected);
   }
 
   for (const [p, marker] of LEAKS) {
     const s = spec('file-served', `GET ${p}`, `GET ${p} (file the app must not serve)`);
     const res = await client.send('GET', p, { common: false });
+    if (await run.transportFault(res, s, '404')) continue;
     if (is2xx(res.s) && !/^\s*<(!doctype|html)/i.test(res.text) && marker.test(res.text)) run.fail('file-served', s, res.s, '404', 'the file content came back');
-    else run.pass(s, res.s ?? res.err, '404 (an SPA index page is fine)');
+    else run.pass(s, res.s, '404 (an SPA index page is fine)');
   }
 }

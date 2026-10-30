@@ -14,9 +14,6 @@ export function rowsOf(text) {
   }
   return null;
 }
-const keyOf = (row) => (row && typeof row === 'object' && row.id !== undefined ? `id:${JSON.stringify(row.id)}` : JSON.stringify(row));
-const keys = (rows) => new Set(rows.map(keyOf));
-
 const VALUES = [
   ['percent', '%'], ['underscore', '_'], ['quote-single', "'"], ['quote-double', '"'], ['backslash', '\\'],
   ['injection-or-number', "' OR 1=1 --"], ['injection-or-string', "%' OR '1'='1"],
@@ -35,12 +32,12 @@ export async function searchProbes(run, { path: route, param }) {
   const control = await client.send('GET', at(`zz-no-match-${nextCounter()}`));
   const allRows = is2xx(all.s) ? rowsOf(all.text) : null;
   const controlRows = is2xx(control.s) ? rowsOf(control.text) : null;
+  // The unfiltered list is optional (some endpoints require the parameter): the control search is the reference.
   let blocked = null;
-  if (!allRows) blocked = `the unfiltered list did not answer a list of rows (${all.s ?? all.err})`;
-  else if (allRows.length === 0) blocked = 'the unfiltered list is empty: create a row first, or the wildcard and injection checks prove nothing';
-  else if (!controlRows) blocked = `a search that matches nothing did not answer a list (${control.s ?? control.err})`;
-  else if (controlRows.length >= allRows.length) blocked = `the ${param} parameter does not filter: a search that matches nothing returned every row`;
-  const allKeys = allRows ? keys(allRows) : new Set();
+  if (allRows && allRows.length === 0) blocked = 'the unfiltered list is empty: create a row first, or the wildcard and injection checks prove nothing';
+  else if (!controlRows) blocked = `a search that matches nothing did not answer a list of rows (${control.s ?? control.err})`;
+  else if (controlRows.length > 0) blocked = `the ${param} parameter does not filter: a search that matches nothing returned ${controlRows.length} rows`;
+  const unverified = allRows ? undefined : 'the unfiltered list needs the parameter, so the existence of rows was not verified';
 
   for (const [tag, v] of VALUES) {
     const s = spec(tag, `GET ${at(v)}`);
@@ -49,10 +46,10 @@ export async function searchProbes(run, { path: route, param }) {
     if (await run.transportFault({ ...res }, { ...s, hint: /'/.test(v) ? 'a quote breaks the query: SQL built by concatenation, or a driver that rejects the literal (to_tsquery): confirm' : undefined }, expected)) continue;
     if (blocked) { run.notRun(s, blocked); continue; }
     const rows = is2xx(res.s) ? rowsOf(res.text) : null;
-    if (rows && (tag === 'percent' || tag === 'underscore') && keys(rows).size === allKeys.size && [...allKeys].every((k) => keys(rows).has(k))) {
-      run.fail('wildcard-unescaped', s, res.s, expected, `${v} matched every row: it reached LIKE unescaped`);
-    } else if (rows && tag.startsWith('injection') && rows.length > controlRows.length && [...allKeys].every((k) => keys(rows).has(k))) {
-      run.fail('sql-injection', s, res.s, expected, 'the injected OR returned every row, a search that matches nothing returned none');
-    } else run.pass(s, res.s, expected);
+    if (rows && (tag === 'percent' || tag === 'underscore') && rows.length > controlRows.length) {
+      run.fail('wildcard-unescaped', s, res.s, expected, `${v} matched ${rows.length} rows while a search that matches nothing matched none: it reached LIKE unescaped`);
+    } else if (rows && tag.startsWith('injection') && rows.length > controlRows.length) {
+      run.fail('sql-injection', s, res.s, expected, 'the injected OR returned rows, a search that matches nothing returned none');
+    } else run.pass(s, res.s, expected, unverified);
   }
 }

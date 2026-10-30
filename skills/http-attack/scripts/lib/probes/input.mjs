@@ -1,5 +1,5 @@
-import { is2xx } from '../http.mjs';
-import { caseVariant, isJsonBody, splitAtField, withField, withValue, wire } from '../body.mjs';
+import { granted } from '../http.mjs';
+import { caseVariant, isJsonBody, splitAtField, stringFields, withField, withValueAt, wire } from '../body.mjs';
 
 const MIB = 1 << 20;
 const ACCEPTED = (s) => s >= 200 && s < 400;
@@ -47,37 +47,44 @@ export async function malformedInput(run, w) {
       else run.pass(variantSpec, variant.s, 'accepted');
     }
 
-    for (const [label, tag, value] of [['a number', 'number', 1], ['null', 'null', null], ['an array', 'array', ['a']], ['an object', 'object', { a: 1 }]]) {
-      const t = spec(`wrong-type-${tag}`, `string field sent as ${label}`);
-      const body = withValue(wire(w, st), value);
-      if (body === null) { run.notRun(t, 'the body has no string field to replace with another type'); continue; }
-      await mustRefuse(t, await send(w.method, body), '400/422: wrong type, never coerced, never a 5xx');
+    const fields = stringFields(wire(w, st));
+    if (!fields.length) run.notRun(spec('wrong-type', 'string field sent as another type'), 'the body has no string field to replace with another type');
+    for (const path of fields) {
+      const name = path.join('.');
+      for (const [label, tag, value] of [['a number', 'number', 1], ['null', 'null', null], ['an array', 'array', ['a']], ['an object', 'object', { a: 1 }]]) {
+        await mustRefuse(spec(`wrong-type-${tag}-${name}`, `"${name}" sent as ${label}`), await send(w.method, withValueAt(wire(w, st), path, value)), '400/422: wrong type, never coerced, never a 5xx');
+      }
     }
   } else run.notRun(spec('json-probes', 'JSON probes'), 'the write body is not JSON: malformed JSON, invalid UTF-8, media type and wrong-type probes need a JSON body');
+
+  // Only a 413 shows the limit works. A 400/422 is the validation of the field the probe padded: the limit was not tested.
+  const limitVerdict = async (s, res, expected, rule) => {
+    if (await run.transportFault(res, s, expected)) return;
+    if (res.s === 413) run.pass(s, res.s, expected);
+    else if (granted(res)) run.fail(rule, s, res.s, expected, rule === 'limit-counts-characters' ? `${res.s} for a body over the limit` : undefined);
+    else run.notRun(s, `answered ${res.s}: the body was refused by validation (or another check) before a size limit, so the limit was not tested`);
+  };
 
   const big = spec('body-1mb', '1 MB body');
   if (st.bodyLimit && st.bodyLimit >= MIB) run.skipped(big, `bodyLimit ${st.bodyLimit} is at least 1 MB`);
   else {
     const body = withField(wire(w, st), (v) => v + 'a'.repeat(MIB));
     if (body === null) run.notRun(big, 'the body has no string field to pad to 1 MB');
-    else await mustRefuse(big, await send(w.method, body), '413 (or 400), never stored and never a 5xx', 'no-body-limit');
+    else await limitVerdict(big, await send(w.method, body), '413, never stored and never a 5xx', 'no-body-limit');
   }
 
   const bytesProbe = spec('limit-counts-bytes', 'body 1+ byte over the limit made of multibyte characters');
-  if (st.bodyLimit && json) {
+  const bigRow = run.rows.findLast((r) => r.probe === 'body-1mb' && r.target === target);
+  if (!json) { /* the JSON probes above already reported why */ }
+  else if (!st.bodyLimit) run.skipped(bytesProbe, 'no body limit configured (--body-limit or bodyLimit)');
+  else if (bigRow?.rule === 'no-body-limit') run.skipped(bytesProbe, 'the 1 MB body was accepted: there is no limit to count bytes against');
+  else {
     const q = wire(w, st);
     const rest = Buffer.byteLength(withField(q, () => '') ?? '');
     const body = withField(q, () => 'é'.repeat(Math.floor((st.bodyLimit - rest) / 2) + 1));
     if (body === null) run.notRun(bytesProbe, 'the body has no string field to pad with multibyte characters');
-    else {
-      const res = await send(w.method, body);
-      const expected = '413: the limit counts bytes, not characters';
-      if (!(await run.transportFault(res, bytesProbe, expected))) {
-        if (is2xx(res.s)) run.fail('limit-counts-characters', bytesProbe, res.s, expected, `${[...body].length} characters, ${Buffer.byteLength(body)} bytes were accepted`);
-        else run.pass(bytesProbe, res.s, expected);
-      }
-    }
-  } else if (json) run.skipped(bytesProbe, 'no body limit configured (--body-limit or bodyLimit)');
+    else await limitVerdict(bytesProbe, await send(w.method, body), '413: the limit counts bytes, not characters', 'limit-counts-characters');
+  }
 
   for (const m of ['PUT', 'DELETE', 'PATCH'].filter((x) => x !== w.method)) {
     const s = spec(`method-${m.toLowerCase()}`, `${m} (a method the route does not take)`);
