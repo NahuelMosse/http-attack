@@ -53,7 +53,8 @@ async function runAll(run) {
     else notRunDependents(run, w, legit.res ? `answered ${legit.res.s}` : 'no usable answer');
   }
   // Before the probes that delete (IDOR) or store oversized rows, so the list still holds the legitimate rows.
-  for (const s of opts.searches) await searchProbes(run, s);
+  const createdBodies = ready.map((w) => w.body);
+  for (const s of opts.searches) await searchProbes(run, s, createdBodies);
   for (const w of ready) await accessProbes(run, w, legits.get(w));
   await readsWithoutCredentials(run);
   for (const w of ready) await malformedInput(run, w);

@@ -178,6 +178,21 @@ test('search without rows is NOT RUN, never a pass', () => withServer({}, async 
   assert.ok(r.row('not-run:percent:GET /items'));
 }));
 
+test('search whose parameter is required passes only when a row the run created is found by an exact search', async () => {
+  await withServer({ requireQ: true }, async (s) => {
+    const none = await attack(s.url, [...ALICE, '--search', '/items q']);
+    assert.ok(none.row('not-run:percent:GET /items'), 'no row is known to exist: NOT RUN');
+    assert.ok(!none.byProbe('percent').some((x) => x.verdict === 'pass'));
+    const created = await attack(s.url, [...ALICE, '--write', ITEM, '--search', '/items q']);
+    assert.equal(created.row('ok:percent:GET /items')?.verdict, 'pass');
+    assert.equal(created.row('ok:injection-or-number:GET /items')?.verdict, 'pass');
+  });
+  await withServer({ requireQ: true, likeWild: true }, async (s) => {
+    const r = await attack(s.url, [...ALICE, '--write', ITEM, '--search', '/items q']);
+    assert.ok(r.has('wildcard-unescaped:percent:GET /items'));
+  });
+});
+
 test('ownership: user B is validated before A is probed', async () => {
   await withServer({}, async (s) => {
     const bad = await attack(s.url, [...ALICE, '--other-header', 'Authorization: Bearer nobody', '--write', ITEM]);
