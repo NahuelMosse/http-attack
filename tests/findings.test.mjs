@@ -134,7 +134,7 @@ test('Rails-style 422 on a foreign Origin is a CSRF refusal', async () => {
 test('faultCmd and faultRestore (config only): the fault is injected, the 5xx judged, the fault always restored', () => {
   const dir = tempDir();
   const flag = join(dir, 'fault.flag');
-  const toggle = join(SKILL, '..', '..', 'test', 'helpers', 'toggle.mjs');
+  const toggle = join(SKILL, '..', '..', 'tests', 'helpers', 'toggle.mjs');
   return withServer({ faultFile: flag }, async (s) => {
     const r = await attack(s.url, [...ALICE, '--write', ITEM,
       ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"`, faultRestore: `node "${toggle}" off "${flag}"` })]);
@@ -149,7 +149,7 @@ test('faultCmd and faultRestore (config only): the fault is injected, the 5xx ju
 test('the fault probe is NOT RUN, and the command never runs, when no legitimate write succeeded', () => {
   const dir = tempDir();
   const flag = join(dir, 'fault.flag');
-  const toggle = join(SKILL, '..', '..', 'test', 'helpers', 'toggle.mjs');
+  const toggle = join(SKILL, '..', '..', 'tests', 'helpers', 'toggle.mjs');
   return withServer({ faultFile: flag }, async (s) => {
     const r = await attack(s.url, [...ALICE, '--write', 'POST /items {"nope":1}', ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"` })]);
     assert.equal(r.byProbe('database-fault')[0].verdict, 'not-run');
@@ -234,4 +234,10 @@ test('the config file suppresses with a reason and reports the counts; unused ig
   assert.equal(r.report.schemaVersion, 1);
   for (const row of r.report.rows) assert.equal(typeof row.got, 'string');
   assert.ok(readFileSync(join(dir, 'http-attack.config.json'), 'utf8').includes('reason'));
+}));
+
+test('a CSRF probe whose connection is reset once is repeated, not reported as a dropped connection', () => withServer({ resetFirstOrigin: true }, async (s) => {
+  const r = await attack(s.url, [...ALICE, '--header', 'Cookie: session=alice', '--write', ITEM, '--csrf']);
+  assert.ok(!r.report.rows.some((x) => x.rule === 'connection-dropped' && x.group === 'csrf'));
+  assert.ok(r.byProbe('origin-another-port').length > 0 && r.byProbe('origin-another-port').every((x) => x.rule !== 'connection-dropped'));
 }));

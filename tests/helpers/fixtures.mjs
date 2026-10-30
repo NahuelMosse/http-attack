@@ -20,7 +20,7 @@ export async function startFixture(kind, db) {
     let out = '';
     child.stdout.on('data', (d) => { out += d; const m = out.match(/ on (\d+)/); if (m) resolve(Number(m[1])); });
     child.on('exit', (code) => reject(new Error(`${kind} fixture exited ${code}`)));
-    setTimeout(() => reject(new Error(`${kind} fixture did not start`)), 15_000);
+    setTimeout(() => reject(new Error(`${kind} fixture did not start`)), 60_000);
   });
   return { url: `http://127.0.0.1:${port}`, stop: () => child.kill() };
 }

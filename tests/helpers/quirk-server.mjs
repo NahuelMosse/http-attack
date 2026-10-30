@@ -9,6 +9,7 @@ export async function startQuirkServer(q = {}) {
   const items = [];
   const things = [];
   let seq = 0;
+  const resetDone = new Set(); // origins whose first request was reset (resetFirstOrigin)
   const requests = [];
   const json = (res, s, body, extra = {}) => {
     if (res.headersSent) return;
@@ -24,6 +25,7 @@ export async function startQuirkServer(q = {}) {
       let n = 0;
       req.on('data', (d) => { n += d.length; if (n > q.streamLimit) json(res, 413, { error: 'too large' }, { connection: 'close' }); });
     }
+    if (q.resetFirstOrigin && req.headers.origin && !resetDone.has(req.headers.origin)) { resetDone.add(req.headers.origin); return req.socket.destroy(); }
     try {
       const url = new URL(req.url, 'http://x');
       const path = url.pathname;

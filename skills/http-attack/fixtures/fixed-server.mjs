@@ -96,7 +96,8 @@ const server = createServer((req, res) => {
   handle(req, res).catch((e) => {
     if (e instanceof HttpError) {
       reply(res, e.status, e.body, e.extra);
-      if (e.status === 413) res.on('finish', () => req.destroy());
+      // Lingering close: the rest of the body is read and discarded for a moment, because closing a socket with unread data resets it and the client loses the 413.
+      if (e.status === 413) res.on('finish', () => { req.resume(); setTimeout(() => req.destroy(), 2000).unref(); });
       return;
     }
     console.error(e);

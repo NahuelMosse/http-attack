@@ -144,7 +144,10 @@ export async function csrfProbes(run, w) {
     const target = `${w.method} ${w.path}`;
     const s = { group: 'csrf', probe: `origin-${tag}`, target, name: `${target} ${label}` };
     const p = wire(w, st);
-    const r = await client.send(w.method, w.path, { body: p.text, type: p.type, headers });
+    const attempt = () => client.send(w.method, w.path, { body: p.text, type: p.type, headers });
+    // A server that refuses early may reset the connection while the body is still being sent: one repeat before a drop is judged.
+    let r = await attempt();
+    if (r.s === null || r.truncated) r = await attempt();
     const expected = '403 (any 4xx): the Origin is not this app';
     if (await run.transportFault(r, s, expected)) continue;
     if (granted(r)) run.fail('csrf', s, r.s, expected, r.s >= 300 ? `redirected to ${r.headers.location ?? '(no Location)'}: the write was accepted` : undefined);

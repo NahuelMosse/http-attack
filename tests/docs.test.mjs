@@ -46,3 +46,26 @@ test('every option in --help is accepted by the parser and no flag is documented
   for (const f of flags) assert.ok(FLAGS_WITH_VALUE.has(f) || ['--csrf', '--help'].includes(f), `${f} is in --help but not parsed`);
   for (const f of FLAGS_WITH_VALUE) assert.ok(flags.has(f), `${f} is parsed but missing from --help`);
 });
+
+test('every eval case grants only read tools and the Skill tool, in its frontmatter', () => {
+  const root = join(import.meta.dirname, '..', 'evals');
+  const cases = readdirSync(root).filter((n) => statSync(join(root, n)).isDirectory());
+  assert.ok(cases.length >= 10);
+  for (const name of cases) {
+    const text = readFileSync(join(root, name, 'prompt.md'), 'utf8').replace(/\r\n/g, '\n');
+    const front = text.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '';
+    assert.match(front, /^allowed_tools: \[Read, Glob, Grep, Skill\]$/m, `${name}: allowed_tools`);
+  }
+});
+
+test('no directory named "test" exists, because plain "node --test" would run every file in it', () => {
+  const stray = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory() || e.name === 'node_modules' || e.name === '.git') continue;
+      if (e.name === 'test') stray.push(join(dir, e.name)); else walk(join(dir, e.name));
+    }
+  };
+  walk(join(import.meta.dirname, '..'));
+  assert.deepEqual(stray, []);
+});

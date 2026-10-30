@@ -95,10 +95,10 @@ The step fails on exit 1 (findings) and exit 2 (could not run). Start the app wi
 
 ```bash
 npm test                         # unit and integration tests
-node test/e2e-fixtures.mjs 3     # attack both fixtures three times: identical results, the fixed one clean
+node tests/e2e-fixtures.mjs 3     # attack both fixtures three times: identical results, the fixed one clean
 ```
 
 `skills/http-attack/fixtures/` holds a deliberately broken API and its fixed twin; the vulnerable one must keep reporting
-the ids pinned in `test/expected-vulnerable.json`.
+the ids pinned in `tests/expected-vulnerable.json`.
 
 MIT licensed. See `NOTICES.md` for the ideas this builds on.
