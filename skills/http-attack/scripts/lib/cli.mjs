@@ -42,16 +42,20 @@ async function runAll(run) {
   run.state = {};
 
   const ready = [];
+  const legits = new Map();
   for (const w of opts.writes) {
     const legit = await legitWrite(run, w);
+    legits.set(w, legit);
     if (legit.ok && legit.item && !run.itemTemplate) run.itemTemplate = inferTemplate(legit.item, legit.res);
-    if (!legit.ok) notRunDependents(run, w, legit.res ? `answered ${legit.res.s}` : 'no usable answer');
-    else { ready.push(w); await accessProbes(run, w, legit); }
+    if (legit.ok) ready.push(w);
+    else notRunDependents(run, w, legit.res ? `answered ${legit.res.s}` : 'no usable answer');
   }
+  // Before the probes that delete (IDOR) or store oversized rows, so the list still holds the legitimate rows.
+  for (const s of opts.searches) await searchProbes(run, s);
+  for (const w of ready) await accessProbes(run, w, legits.get(w));
   await readsWithoutCredentials(run);
   for (const w of ready) await malformedInput(run, w);
   await pathProbes(run, { writes: opts.writes, itemTemplate: run.itemTemplate });
-  for (const s of opts.searches) await searchProbes(run, s);
   await parserProbes(run, { writes: opts.writes });
   for (const w of ready) await resourceProbes(run, w);
   for (const u of opts.uniques) await raceProbe(run, u);

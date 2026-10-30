@@ -52,7 +52,6 @@ createServer(async (req, res) => {
         if (req.headers['content-type'].split(';')[0] !== 'application/json') return reply(res, 415, { error: 'json only' }); // crashes without the header; case-sensitive
         let b; try { b = JSON.parse(raw); } catch { return reply(res, 400, { error: 'bad json' }); }
         if (!b.name || typeof b.email !== 'string') return reply(res, 400, { error: 'invalid' });
-        setImmediate(() => db.prepare('INSERT INTO audit VALUES (?)').run(new Date().toISOString())); // fire and forget: a DB error here kills the process
         if (db.prepare('SELECT 1 FROM items WHERE email = ?').get(b.email)) return reply(res, 409, { error: 'exists' });
         await new Promise((r) => setTimeout(r, 20)); // check, then insert: a race window
         const { lastInsertRowid } = db.prepare('INSERT INTO items (owner, name, email) VALUES (?, ?, ?)').run(who, String(b.name), b.email);
@@ -73,5 +72,6 @@ createServer(async (req, res) => {
     return reply(res, 404, { error: 'not found' });
   } catch (e) {
     reply(res, 500, { error: String(e.stack) }); // leaks the stack
+    if (/database is locked/.test(e.message)) setImmediate(() => { throw e; }); // a database error escapes the handler and kills the process
   }
 }).listen(Number(port), '127.0.0.1', function listening() { console.log(`vulnerable on ${this.address().port}`); });

@@ -25,7 +25,7 @@ export async function pathProbes(run, { writes, itemTemplate }) {
 
   for (const r of routes) {
     const [p, q] = r.split('?');
-    const target = `GET ${p}`;
+    const target = `GET ${r}`;
     const s = spec('double-slash', target, `GET /${p} (double slash)`);
     const [slash, plain] = [await client.send('GET', '/' + p), await client.send('GET', p)];
     if (!(await run.transportFault(slash, s, 'a 4xx or the same resource, never a 5xx: "//x" is a path, not a host'))) {

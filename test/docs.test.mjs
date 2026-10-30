@@ -1,0 +1,45 @@
+// The documentation matches the code: SKILL.md's severity table is the registry, and every rule the code emits is in it.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { SKILL } from './helpers/cli.mjs';
+import { RULES } from '../skills/http-attack/scripts/lib/registry.mjs';
+
+const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+
+const sourceFiles = (dir) => readdirSync(dir).flatMap((f) => (statSync(join(dir, f)).isDirectory() ? sourceFiles(join(dir, f)) : f.endsWith('.mjs') ? [join(dir, f)] : []));
+
+test("SKILL.md's severity table lists exactly the registry rules with their severities", () => {
+  const section = skill.split('\n## Severity')[1].split('\n## ')[0];
+  const rows = [...section.matchAll(/^\| `([a-z-]+)` \| (critical|high|medium|low|-) \|/gm)].map((m) => [m[1], m[2] === '-' ? null : m[2]]);
+  assert.deepEqual(Object.fromEntries(rows), Object.fromEntries(Object.entries(RULES).map(([k, v]) => [k, v.severity])));
+  assert.equal(rows.length, Object.keys(RULES).length, 'no rule listed twice');
+});
+
+test('every rule the code emits is registered, and every registered rule is emitted', () => {
+  const code = sourceFiles(join(SKILL, 'scripts', 'lib')).filter((f) => !f.endsWith('registry.mjs')).map((f) => readFileSync(f, 'utf8')).join('\n');
+  const emitted = new Set([...code.matchAll(/\.fail\(\s*'([a-z-]+)'/g)].map((m) => m[1]));
+  for (const rule of emitted) assert.ok(rule in RULES, `${rule} is emitted but not registered`);
+  const viaOther = new Set(['not-run']); // rows made by notRun()
+  for (const rule of Object.keys(RULES)) assert.ok(emitted.has(rule) || viaOther.has(rule) || code.includes(`'${rule}'`), `${rule} is registered but never emitted`);
+});
+
+test('SKILL.md follows the plugin conventions', () => {
+  const front = skill.match(/^---\n([\s\S]*?)\n---/)[1];
+  assert.match(front, /^name: http-attack$/m);
+  assert.match(front, /^allowed-tools: Bash\(node \$\{CLAUDE_SKILL_DIR\}\/scripts\/\*\)$/m);
+  assert.ok(front.match(/^description: (.*)$/m)[1].length <= 650, 'the description stays short');
+  assert.ok(skill.split('\n').length < 500);
+  assert.ok(skill.includes('${CLAUDE_SKILL_DIR}/scripts/http-attack.mjs'));
+  assert.ok(!skill.includes('<skill-dir>'));
+  assert.ok(!/allow-remote/i.test(skill), 'the human-only override is not documented to the agent');
+  assert.match(skill, /every remaining one is suppressed in the config with its/);
+});
+
+test('every option in --help is accepted by the parser and no flag is documented that does not exist', async () => {
+  const { HELP, FLAGS_WITH_VALUE } = await import('../skills/http-attack/scripts/lib/args.mjs');
+  const flags = new Set([...HELP.matchAll(/^\s+(--[a-z-]+)/gm)].map((m) => m[1]));
+  for (const f of flags) assert.ok(FLAGS_WITH_VALUE.has(f) || ['--csrf', '--help'].includes(f), `${f} is in --help but not parsed`);
+  for (const f of FLAGS_WITH_VALUE) assert.ok(flags.has(f), `${f} is parsed but missing from --help`);
+});

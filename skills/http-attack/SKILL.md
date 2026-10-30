@@ -1,6 +1,7 @@
 ---
 name: http-attack
-description: Adversarially probe a running HTTP API on localhost to find the failures unit tests miss - 5xx on malformed input, parser errors that skip the app's common headers, duplicate creates under concurrency, unbounded or slow bodies, LIKE wildcards and SQL injection in search, a process that dies on a database fault, missing auth or object ownership (IDOR), data lost on restart. Use when the user asks to attack, harden, fuzz or break-test an API they run locally, or to check it "never answers 500". Not for static code review, load testing, OpenAPI contract conformance, or any host the user does not own.
+description: Break-test an HTTP API the user runs locally before shipping it. Sends malformed bodies, hostile paths, raw parser errors, concurrent duplicate creates, never-ending bodies, LIKE/SQL injection in search, database faults, missing auth, IDOR and CSRF, and reports each failure with its severity and the correct response. Use when asked to attack, harden, fuzz or break-test a local API, or to check it never answers 500. Not for code review, load tests, OpenAPI conformance, or hosts the user does not own.
+allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/*)
 ---
 
 # http-attack
@@ -8,142 +9,173 @@ description: Adversarially probe a running HTTP API on localhost to find the fai
 Unit tests prove the handler does what the developer thought of. This skill sends what the developer did not think of,
 against the real server, and reports each failure with its severity and the response that would have been correct.
 
-**Scope and safety.** Only a server the user owns and runs on this machine (`localhost`, `127.0.0.1`, `::1`). The probes
-create rows, delete rows, lock the database and send 50 MB bodies: never point them at shared, staging or production
-hosts. Use a throwaway database file.
+## Scope and safety
+
+- Only an app the user owns, running on this machine (`localhost`, `127.0.0.1`, `::1`). The script refuses other hosts.
+- **Loopback is not proof the app is local.** `kubectl port-forward`, `ssh -L`, a cloud SQL proxy or a dev tunnel all answer on
+  `127.0.0.1` while the data lives elsewhere. Confirm with the user that the app behind the port is a local process.
+- The probes create about 20-40 rows per write route, delete rows, lock the database and send 50 MB bodies. **Use a
+  throwaway database** (a scratch SQLite file, or a Postgres/MySQL database created for this run), never one with data
+  that matters. If you cannot confirm it is throwaway, stop and ask.
 
 ## Method
 
 1. **Discover the surface.** Read the router (or the OpenAPI file) and list every route as one of: *create* (POST that
-   stores), *update/delete*, *read one* (`/items/{id}`), *list*, *search* (list with a free-text parameter). Note for each:
-   auth scheme (bearer, cookie, API key), the unique keys of the stored entity, the body limit, the database driver and
-   file, and the headers every response is supposed to carry (request id, CORS, `Cache-Control`, security headers).
-2. **Start the app** on a free port with a scratch database, and get two sets of credentials (user A and user B).
-3. **Pick the probes by route kind** (catalogue below) and run them. `scripts/http-attack.mjs` runs the whole catalogue in
-   one command; anything it does not cover (business-logic abuse, mass assignment of specific fields) is done by hand
-   with `curl`.
-4. **Classify each finding** with the severity table. A probe that could not reach a verdict (the legitimate body was
-   refused, the app was down) is *not run*, never *passed*.
-5. **Fix** at the right layer (guidance per finding below), not by special-casing the probe.
-6. **Re-run the same command** until it reports 0 findings, and add a regression test per fixed finding to the app's
-   own suite, so the next change cannot reintroduce it.
+   stores), *update/delete*, *read one* (`/items/{id}`), *list*, *search* (list with a free-text parameter). Note per route: the
+   auth scheme (bearer, cookie, API key, custom header), the unique keys of the stored entity, the body limit, the
+   database, the maximum header size, whether the route is public by design, and the headers every response must carry
+   (request id, CORS, `Cache-Control`, security headers).
+2. **Start the app** on a free port with the scratch database and get credentials for two users (see below).
+3. **Run the script** (below) with one `--write` per create/update route, `--read` per list, `--search` per search route,
+   `--unique` per create guarded by a unique key.
+4. **Triage every row.** `FAIL` is a finding; `NOT RUN` is a probe that could not reach a verdict (the legitimate body was
+   refused, no item route is known, no rows to search): fix the input and run again, it is never a pass. A finding that is
+   correct behaviour for this app is not a bug: say so and suppress it in the config with the reason (next section), do not
+   change the app to satisfy the probe.
+5. **Fix** real findings at the right layer (`references/fixes.md` has the fix per finding and stack), not by special-casing
+   the probe. Add a regression test per fixed finding to the app's own suite.
+6. **Re-run the same command** until it reports **0 findings, or every remaining one is suppressed in the config with its
+   reason**, and no row is `NOT RUN` (or each is suppressed with a reason). Exit code 0 means exactly that.
+7. **Clean up**: the run left rows in the scratch database; drop the database (or the file), do not reuse it.
 
-## The script
+## Running it
+
+Git Bash / macOS / Linux:
 
 ```bash
-node scripts/http-attack.mjs http://127.0.0.1:3000 \
+MSYS_NO_PATHCONV=1 node "${CLAUDE_SKILL_DIR}/scripts/http-attack.mjs" http://127.0.0.1:3000 \
   --header "Authorization: Bearer $TOKEN_A" --other-header "Authorization: Bearer $TOKEN_B" \
   --write 'POST /items {"name":"Ana","email":"ana@example.com"}' \
   --read "/items?limit=10" --search "/items q" \
   --unique 'POST /items {"name":"Uno","email":"uno@example.com"}' \
-  --common-headers "X-Request-Id, Cache-Control" --body-limit 65536 \
+  --item-path "/items/{id}" --common-headers "X-Request-Id, Cache-Control" --body-limit 65536 \
   --fault-sqlite ./data/app.db
 ```
 
-Node 22.5+ (for `node:sqlite`), no dependencies. Every write body gets a per-run suffix on its email (or first free-text
-field) so a uniqueness rule never answers in place of the defense under test. Exit 0 = no findings, 1 = findings,
-2 = could not run. `--format json` for machine output. Persistence is a two-step run around a restart:
-`--persist-save state.json`, restart the app, `--persist-verify state.json`. On Git Bash for Windows set
-`MSYS_NO_PATHCONV=1` so `/items` is not rewritten into a Windows path, and give the app and `--fault-sqlite` the same
-absolute Windows path (`D:/app/data/app.db`), so both open the same file. The comment block at the top of
-`scripts/http-attack.mjs` lists every option.
+Windows PowerShell (5.1 strips the quotes inside inline JSON, so put bodies in files):
 
-## Severity
+```powershell
+Set-Content -Encoding ascii body.json '{"name":"Ana","email":"ana@example.com"}'
+node "${env:CLAUDE_SKILL_DIR}\scripts\http-attack.mjs" http://127.0.0.1:3000 `
+  --header "Authorization: Bearer $env:TOKEN_A" --write "POST /items @body.json" --read "/items?limit=10"
+```
 
-| Severity | Meaning | Examples |
-|---|---|---|
-| critical | data or access is compromised, or the process dies | IDOR, unauthenticated access, SQL injection, duplicates stored, crash on DB fault, repo file served |
-| high | the server fails on input it must refuse | any 5xx on client input, unique violation as 500, body never cut, wrong type coerced and stored |
-| medium | correct refusal, wrong shape or cost | parser errors without common headers, 50 MB read before the 415, charset refused, stack in the 5xx body |
-| low | protocol detail | 405 without `Allow` |
+An inline JSON body that does not parse exits 2 and shows what arrived. `node scripts/http-attack.mjs --help` lists every option.
+Notes:
 
-## Catalogue: probe, correct response, fix
+- Zero dependencies; Node 22.13 or newer.
+- Every write body gets a per-run suffix on one string field (the first containing `@`, else the first string; `--vary /item/email`
+  picks another, also nested) so a uniqueness rule never answers in place of the defense under test.
+- `--content-type application/vnd.api+json` for non-default media types; `--auth-header-name X-Auth-Token` when credentials
+  travel in a custom header; `--auth-env VAR` / `--other-auth-env VAR` keep tokens off the command line.
+- Cookie authentication: add `--csrf` and pass the cookie with `--header "Cookie: ..."`.
+- Persistence is a two-step run around a restart: `--persist-save state.json`, restart the app, `--persist-verify state.json`.
+- Other databases: `--fault-cmd "docker pause db" --fault-restore "docker unpause db"` (any shell command that breaks the
+  database, and the one that heals it; the restore always runs).
+- On Git Bash for Windows set `MSYS_NO_PATHCONV=1` so `/items` is not rewritten into a Windows path, and give the app and
+  `--fault-sqlite` the same absolute Windows path (`D:/app/data/app.db`).
 
-### Malformed input (every create/update)
-| Probe | Correct | Fix |
-|---|---|---|
-| Truncated JSON `{"x":` | 400, the app's error body | catch the parse error in the body middleware |
-| Invalid UTF-8 bytes inside a string | 400; nothing stored with U+FFFD | decode with `TextDecoder('utf-8', { fatal: true })` or the framework's strict option |
-| JSON with no `Content-Type` | 415 (never 5xx) | read the header defensively: `(h ?? '').split(';')[0]` |
-| `Application/JSON; charset=utf-8` | accepted | compare the media type lowercased, without parameters (RFC 9110 §8.3.1) |
-| A string field sent as number, `null`, array, object | 400/422, never coerced | validate types with a schema; never `String(x)` user input |
-| 1 MB body, and limit+1 bytes made of multibyte chars | 413 | count **bytes** while reading, not characters after decoding |
-| PUT/DELETE/PATCH on a route that does not take them | 405 with `Allow` | let the router answer 405 and set `Allow` |
+**Two users' tokens.** Use the app's own seed or signup: create two users (alice, bob) against the scratch database, log in
+as each, and export the tokens (`TOKEN_A`, `TOKEN_B`) or the session cookies. If the app has no login, a test helper that
+signs a token for two different user ids works. The ownership rows need both; without user B they are skipped.
 
-### Parser-level errors (raw socket)
-| Probe | Correct | Fix |
-|---|---|---|
-| `GARBAGE` request line; raw non-ASCII bytes in the path | 400 + the common headers, connection closed | handle the server's parser-error hook (Node `clientError`, a custom h11/uvicorn handler, the proxy's error page) and write the same headers there |
-| 20 KB header | 431 + common headers | same hook; do not raise the header limit to make it pass |
-| `Content-Length` and `Transfer-Encoding` together | 400 | keep the HTTP server's strict parsing on (request smuggling) |
+## Config file
 
-These answers come from the HTTP parser, before any middleware: a request-id, CORS or security-header middleware never
-sees them. If a proxy answers them by design, pass `--raw-exempt "<why>"` and check the proxy instead.
+`http-attack.config.json` in the project (or `--config <path>`) holds what the command line cannot say. Per-route settings
+go under `routes` (key `"/items"` or `"POST /items"`), top-level keys apply to every route:
 
-### Paths and query
-| Probe | Correct | Fix |
-|---|---|---|
-| `//`, `//items` | 404 or the same resource, never 5xx | do not feed `req.url` to `new URL(path, base)`: `//x` is parsed as a host |
-| `/items/%`, `?x=%FF%` | 400 | wrap `decodeURIComponent`; return 400 on `URIError` |
-| Numeric param as 30 nines, its negative, `1e3`, empty | 400 (or clamped 2xx) | accept `^[0-9]+$` up to a cap; never interpolate numbers into SQL |
-| `HEAD`/`OPTIONS` on each route | 2xx, or 405 with `Allow` | router default |
-| `/.git/config`, `/.env`, `/package.json`, `../../etc/passwd` | 404 | serve static files from a dedicated directory, never the repo root |
+```json
+{
+  "bodyLimit": 65536,
+  "commonHeaders": ["x-request-id", "cache-control"],
+  "routes": {
+    "/catalog": { "public": true },
+    "/imports": { "bodyLimit": 10485760, "invalidUtf8": "replace" },
+    "POST /things": { "idempotentCreate": true }
+  },
+  "ignore": [
+    { "id": "parser-accepted:big-header:raw", "reason": "the load balancer in front caps headers at 1 MB" }
+  ]
+}
+```
 
-### Search
-| Probe | Correct | Fix |
-|---|---|---|
-| `%`, `_` | only rows containing that literal character | bind the term as a parameter and escape `\ % _` with `LIKE ? ESCAPE '\'` |
-| `'`, `"`, `\` | 200 | parameters, never string-built SQL |
-| `' OR 1=1 --`, `%' OR '1'='1` | 200 with no rows (no row contains that text) | parameters; a 5xx or "every row" is an injection |
+| Setting | Meaning |
+|---|---|
+| `public` | reads and writes without credentials are expected to succeed |
+| `bodyLimit` | the documented limit in bytes: the never-ending body sends limit+1 bytes, the multibyte probe is built from it |
+| `maxHeaderBytes` | the app's header limit: the oversized-header probe sends limit+1 KB |
+| `invalidUtf8` | `reject` (default) or `replace` (the parser substitutes U+FFFD by design) |
+| `idempotentCreate` | several 2xx for one key are expected (`ON CONFLICT DO NOTHING`) |
+| `vary`, `contentType` | as the flags |
+| `ignore` | `{id, reason}`: `id` is a finding id (shown in every report row), a rule name (`stack-leak`), or a prefix ending in `*`. A reason is mandatory |
 
-The wildcard check needs at least one stored row; the script creates it through `--write` first.
-
-### Concurrency
-| Probe | Correct | Fix |
-|---|---|---|
-| 8 identical creates on a unique key, released together (last-byte sync) | exactly one 201, seven 409 | a `UNIQUE` constraint in the database, and map its violation error to 409; check-then-insert in the app is not enough |
-
-Also try by hand where the domain has it: double-spend of a one-time token, two updates with the same version
-(expect one 409/412), a counter decremented below zero.
-
-### Resources
-| Probe | Correct | Fix |
-|---|---|---|
-| 50 MB `text/plain` to a JSON route | 415 at the first bytes (well under 2 s) | check `Content-Type` before reading the body |
-| JSON body that never ends (chunked) | 413 at the limit, or 408 / close within the request timeout | a byte limit in the body reader, and server request/header timeouts |
-
-### Faults and durability
-| Probe | Correct | Fix |
-|---|---|---|
-| A write while the SQLite file is held with `BEGIN EXCLUSIVE` | 503 (or 500) with the generic body and common headers; the process keeps answering | await every DB call inside the handler's error boundary; no fire-and-forget writes; a global `unhandledRejection` logger is a backstop, not the fix |
-| 5xx body content | `{"error":"internal"}`-style, no stack, no driver message | log the error server-side, answer a fixed body |
-| Create, restart the process, read back | same status and body | commit before answering; no in-memory store; migrations run on start |
-
-For other databases, simulate the fault by hand: stop the container mid-request, revoke write permission, fill the
-connection pool. The expected behaviour is the same.
-
-### Authentication and ownership (OWASP API1, API2, API5)
-| Probe | Correct | Fix |
-|---|---|---|
-| Each write and read without credentials | 401 | auth middleware on the router, deny by default |
-| User B reads and deletes user A's item (`Location` of A's create) | 404 (or 403) | scope every query by owner: `WHERE id = ? AND owner = ?` |
-| `--csrf` (cookie auth only): write with a foreign `Origin`, another port of the same host, `Origin: null` | 403 | check `Origin` against the app's own origin; `SameSite` alone does not cover same-site, other-port pages |
-
-Not automated, check by hand: mass assignment (send `"role":"admin"`, `"owner":"bob"` on create and update; expect it
-ignored), excessive data exposure (responses carry no hash, token or internal field), function-level authorization
-(a regular user calling admin routes), rate limits on login and expensive endpoints.
+The config can also list `writes`, `reads`, `searches`, `uniques` (bodies as objects or `"@file"`) and `persistIgnore`
+(fields skipped when comparing the persisted item).
 
 ## Reading the report
 
-Each line is `pass`, `FAIL <severity>` or `NOT RUN`, with the status seen; a failure adds `expected:` and `evidence:`.
-Fix critical and high first. A `NOT RUN` row says why (the legitimate body was refused, the list was empty): fix the
-input and run again; it is never a pass. For the security floor of a whole application, map the findings to the
-OWASP ASVS level 1 requirements (V2 validation, V4 API, V8 authorization, V13 configuration) and test the rest there.
+Each row is `pass`, `FAIL <severity>`, `NOT RUN`, `suppressed` or `skipped` (the config says it does not apply). Failures show
+`expected:`, `evidence:` and an `id:` that is stable between runs. `--format json` prints `{schemaVersion: 1, summary, findings,
+rows}`; the summary counts `run`, `passed`, `failed`, `suppressed`, `notRun`, `skipped` and findings by severity.
+Exit codes: `0` no findings, `1` findings, `2` the run could not complete (bad argument, app down, crash, zero probes run, or
+some probe not run).
+
+## Severity
+
+Every rule the script can emit; the finding id is `<rule>:<probe>:<target>`.
+
+| Rule | Severity | Meaning |
+|---|---|---|
+| `process-died` | critical | the app stopped answering during a probe |
+| `unauthenticated-access` | critical | a write or read is granted (2xx) without credentials |
+| `idor` | critical | another user's credentials reach this user's object (2xx) |
+| `sql-injection` | critical | an injected OR returns rows that a no-match control does not |
+| `duplicates-stored` | critical | concurrent identical creates stored more than one distinct item |
+| `file-served` | critical | a repo, secret or OS file came back over HTTP |
+| `csrf` | critical | a cookie-authenticated write from a foreign Origin was accepted |
+| `not-durable` | critical | a saved item is gone or different after a restart |
+| `connection-dropped` | high | the connection was closed without a response while the app stayed up |
+| `server-error` | high | a 5xx on client input (including path params, quotes and unique violations) |
+| `accepted-invalid` | high | input that must be refused got a 2xx/3xx (bad JSON, invalid UTF-8, wrong type, other methods) |
+| `no-body-limit` | high | a body over the limit is accepted, or a body that never ends is read forever |
+| `double-slash-mismatch` | high | `//x` answers 2xx with something other than `/x` |
+| `wildcard-unescaped` | high | `%` or `_` in a search reach LIKE as wildcards |
+| `parser-accepted` | high | the HTTP parser let a malformed raw request through |
+| `fault-not-reported` | high | a write during a database fault was not answered with a 5xx |
+| `limit-counts-characters` | medium | the body limit counts characters, not bytes |
+| `read-before-reject` | medium | a 50 MB body was read in full before the 415 |
+| `media-type-strict` | medium | a case or parameter variant of the media type is refused (RFC 9110 8.3.1) |
+| `stack-leak` | medium | a 5xx body leaks a stack trace, driver error or SQLSTATE |
+| `parser-no-common-headers` | medium | a parser-level error lacks the app's common headers |
+| `headers-missing` | medium | a response lacks a header every response must carry |
+| `missing-allow` | low | 405 without an `Allow` header |
+| `head-unsupported` | low | HEAD on a readable route answers 405 (RFC 9110 9.1) |
+| `not-run` | - | a probe could not reach a verdict; never a pass |
+
+## What the script probes
+
+| Group | Probes | Correct response |
+|---|---|---|
+| input | truncated JSON, invalid UTF-8 inside a string, no `Content-Type`, `Application/JSON; charset=utf-8`, a string field sent as number/null/array/object, 1 MB body, limit+1 bytes of multibyte characters, PUT/DELETE/PATCH on the route | 4xx, never 5xx, nothing coerced or stored |
+| paths | `//x` vs `/x`, `/%`, `?x=%FF%`, 30-digit numbers in query and path parameters (`/items/999...`, `/items/abc`, invalid UUID), HEAD/OPTIONS, `/.git/config`, `/.env`, `../../etc/passwd`, win.ini | 4xx or the same resource, never 5xx; files 404 |
+| search | `%`, `_`, quotes, `\`, `' OR 1=1 --`, compared as parsed rows against a search that matches nothing | only rows containing the literal text |
+| parser (raw socket) | `GARBAGE` request line, non-ASCII bytes in the path, an oversized header, `Content-Length` with `Transfer-Encoding` | 400/431 with the common headers, connection closed |
+| resources | 50 MB `text/plain` to a JSON route, a chunked body that never ends (sends limit+1 bytes) | 415 at the first bytes; 413 at the limit or 408/close |
+| concurrency | N identical creates released together (last-byte sync) | exactly one 201, the rest 409 |
+| faults | a legitimate write while the database is locked or broken (`--fault-sqlite`, `--fault-cmd`) | 503/500 with a generic body, the process keeps answering |
+| auth | each write and read without credentials; user B reads and deletes A's item (after checking B can use its own) | 401 (or a redirect to login); 404/403 for B |
+| csrf | write with a foreign `Origin`, another port of the same host, `Origin: null` | 4xx |
+| durability | create, restart, read back | same status and body |
+
+Also check by hand what the script cannot: mass assignment (`"role":"admin"` on create/update), excessive data exposure, function-level
+authorization (a regular user calling admin routes), rate limits on login, business-logic abuse (double-spend of a one-time token,
+two updates with the same version, a counter below zero). Map findings to OWASP API Security Top 10 (API1, API2, API4, API5) and ASVS
+level 1 for the security floor of a whole application.
 
 ## What this skill does not do
 
-- Contract conformance against an OpenAPI schema and property-based generation of inputs: use Schemathesis.
-- Stateful sequence fuzzing over a whole API: use RESTler.
+- Contract conformance against an OpenAPI schema and property-based input generation: Schemathesis.
+- Stateful sequence fuzzing over a whole API: RESTler.
 - Known-CVE and misconfiguration scanning of the stack: OWASP ZAP API scan or Nuclei templates.
 - Content discovery of unlinked routes: ffuf with a wordlist.
-- Load and latency limits: a load tool, not this.
+- Load and latency limits: a load tool.

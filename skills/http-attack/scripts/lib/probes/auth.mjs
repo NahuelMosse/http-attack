@@ -17,7 +17,7 @@ export function itemUrlOf(res, { base, itemPath }) {
 }
 
 // A stable label for an item URL: the id segment becomes {id}.
-export const itemLabel = (url, template) => template ?? url.split('?')[0].replace(/[^/]+$/, '{id}');
+export const itemLabel = (url, template) => (template && url.startsWith(template.split('{id}')[0]) ? template : url.split('?')[0].replace(/[^/]+$/, '{id}'));
 
 // The id-less template of an item route, learned from a created item's Location when --item-path was not given.
 export const inferTemplate = (url, res) => {
@@ -53,8 +53,8 @@ export function notRunDependents(run, w, why) {
   }
 }
 
-const unauthenticated = async (run, spec, method, path, expected) => {
-  const res = await run.client.send(method, path, { auth: 'none' });
+const unauthenticated = async (run, spec, method, path, expected, payload = {}) => {
+  const res = await run.client.send(method, path, { auth: 'none', ...payload });
   if (await run.transportFault(res, spec, expected)) return;
   if (is2xx(res.s)) run.fail('unauthenticated-access', spec, res.s, expected);
   else run.pass(spec, res.s, expected);
@@ -70,7 +70,10 @@ export async function accessProbes(run, w, legit) {
 
   if (client.hasCredentials()) {
     if (st.public) run.skipped(spec('write-without-credentials', `${target} without credentials`), 'the route is configured public');
-    else await unauthenticated(run, spec('write-without-credentials', `${target} without credentials`), w.method, w.path, '401 (or a redirect to login)');
+    else {
+      const p = wire(w, st);
+      await unauthenticated(run, spec('write-without-credentials', `${target} without credentials`), w.method, w.path, '401 (or a redirect to login)', { body: p.text, type: p.type });
+    }
     if (legit.item) await unauthenticated(run, spec('item-without-credentials', `GET ${label} without credentials`, `GET ${label}`), 'GET', legit.item, '401 (or a redirect to login)');
   } else if (!run.state.noCredentialsReported) {
     run.state.noCredentialsReported = true;
