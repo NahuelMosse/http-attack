@@ -1,3 +1,7 @@
+---
+allowed_tools: [Read, Glob, Grep, Skill]
+---
+
 Review this route handler for security bugs:
 
 ```js

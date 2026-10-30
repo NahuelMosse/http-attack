@@ -3,8 +3,11 @@ on:
   push:
     branches: [main, hardening]
   pull_request:
+permissions:
+  contents: read
 jobs:
   test:
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -19,9 +22,31 @@ jobs:
       - name: Unit and integration tests
         run: npm test
       - name: Fixtures end to end, three identical runs
-        run: node test/e2e-fixtures.mjs 3
+        run: node tests/e2e-fixtures.mjs 3
+  windows-powershell:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Windows PowerShell 5.1, body from a file
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion
+          $app = Start-Process node -ArgumentList 'skills/http-attack/fixtures/fixed-server.mjs','3917',"$env:RUNNER_TEMPapp.db" -PassThru
+          Start-Sleep -Seconds 3
+          Set-Content -Path "$env:RUNNER_TEMPody.json" -Value '{"name":"Ana","email":"ana@example.com"}'
+          node skills/http-attack/scripts/http-attack.mjs http://127.0.0.1:3917 --header "Authorization: Bearer alice" --other-header "Authorization: Bearer bob" --write "POST /items @$env:RUNNER_TEMPody.json" --format json | Out-File "$env:RUNNER_TEMPeport.json" -Encoding utf8
+          $code = $LASTEXITCODE
+          Stop-Process -Id $app.Id -ErrorAction SilentlyContinue
+          $r = Get-Content "$env:RUNNER_TEMPeport.json" -Raw | ConvertFrom-Json
+          if (-not ($r.rows | Where-Object { $_.id -eq 'ok:legit-write:POST /items' })) { throw 'the legitimate write from the body file did not pass' }
+          if ($code -ne 0) { throw "unexpected findings, exit $code" }
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
