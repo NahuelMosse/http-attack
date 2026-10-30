@@ -1,5 +1,5 @@
 import { HELP, parseArgs } from './args.mjs';
-import { applyIgnores, loadConfig } from './config.mjs';
+import { applyIgnores, loadConfig, unusedRoutes } from './config.mjs';
 import { UsageError } from './errors.mjs';
 import { createClient } from './http.mjs';
 import { EXIT } from './registry.mjs';
@@ -10,7 +10,7 @@ import { faultProbe } from './probes/fault.mjs';
 import { malformedInput } from './probes/input.mjs';
 import { parserProbes } from './probes/parser.mjs';
 import { pathProbes } from './probes/paths.mjs';
-import { persistSave, persistVerify } from './probes/persist.mjs';
+import { checkPersistPath, persistSave, persistVerify } from './probes/persist.mjs';
 import { raceProbe } from './probes/race.mjs';
 import { resourceProbes } from './probes/resources.mjs';
 import { searchProbes } from './probes/search.mjs';
@@ -28,6 +28,8 @@ function mergeOptions(opt, config) {
     searches: [...config.searches, ...opt.searches],
     common: opt.common.length ? opt.common : lower(config.commonHeaders ?? []),
     rawExempt: opt.rawExempt ?? config.rawExempt,
+    faultCmd: config.faultCmd,
+    faultRestore: config.faultRestore,
     authHeaderNames: [...new Set([...lower(config.authHeaderNames ?? []), ...opt.authHeaderNames])],
     itemPath: opt.itemPath ?? config.itemPath,
   };
@@ -60,7 +62,7 @@ async function runAll(run) {
   for (const w of ready) await resourceProbes(run, w);
   for (const u of opts.uniques) await raceProbe(run, u);
   if (opts.csrf) for (const w of ready) await csrfProbes(run, w);
-  if (opts.faultSqlite || opts.faultCmd) await faultProbe(run, ready[0] ?? opts.writes[0]);
+  if (opts.faultSqlite || opts.faultCmd) await faultProbe(run, ready[0]);
 
   if (opts.common.length) {
     const spec = { group: 'headers', probe: 'common-headers', target: 'responses', name: `every response carries ${opts.common.join(', ')}` };
@@ -85,6 +87,7 @@ export async function main(argv, io = {}) {
     const run = new Run({ client, opts, config });
 
     if (opts.persistSave || opts.persistVerify) {
+      checkPersistPath(opts.persistSave ?? opts.persistVerify, config, cwd);
       run.itemPath = opts.itemPath;
       const result = opts.persistSave ? await persistSave(run, opts.persistSave) : await persistVerify(run, opts.persistVerify);
       const first = await client.alive();
@@ -96,7 +99,7 @@ export async function main(argv, io = {}) {
     await runAll(run);
     const unusedIgnores = applyIgnores(run.rows, config.ignore);
     const summary = summarize(run.rows);
-    const report = { base: parsed.base.origin, rows: run.rows, summary, unusedIgnores };
+    const report = { base: parsed.base.origin, rows: run.rows, summary, unusedIgnores, unusedRoutes: unusedRoutes(config) };
     out(`${opts.format === 'json' ? renderJson(report) : renderText(report)}\n`);
     return exitCode(summary);
   } catch (e) {

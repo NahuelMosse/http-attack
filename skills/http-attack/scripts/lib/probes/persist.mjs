@@ -1,8 +1,21 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { UsageError } from '../errors.mjs';
 import { is2xx } from '../http.mjs';
 import { wire } from '../body.mjs';
 import { itemUrlOf } from './auth.mjs';
+
+const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+
+// The state file is read and written by the tool: keep it inside the working directory, the temp directory or the config's persistDir.
+export const checkPersistPath = (file, config, cwd) => {
+  const abs = resolve(cwd, file);
+  const target = join(real(dirname(abs)), basename(abs));
+  const roots = [cwd, tmpdir(), config.persistDir].filter(Boolean).map(real);
+  const inside = roots.some((root) => { const rel = relative(root, target); return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel); });
+  if (!inside) throw new UsageError(`${file} is outside the working directory and the temp directory: set "persistDir" in the config file to allow it.`);
+};
 
 const canonical = (value, ignore) => {
   if (Array.isArray(value)) return value.map((v) => canonical(v, ignore));

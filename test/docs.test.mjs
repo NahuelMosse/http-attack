@@ -28,12 +28,15 @@ test('every rule the code emits is registered, and every registered rule is emit
 test('SKILL.md follows the plugin conventions', () => {
   const front = skill.match(/^---\n([\s\S]*?)\n---/)[1];
   assert.match(front, /^name: http-attack$/m);
-  assert.match(front, /^allowed-tools: Bash\(node \$\{CLAUDE_SKILL_DIR\}\/scripts\/\*\)$/m);
+  assert.doesNotMatch(front, /allowed-tools/, 'a tool that deletes rows and locks the database must prompt on every run');
+  assert.ok(!skill.includes('${env:CLAUDE_SKILL_DIR}'), '${CLAUDE_SKILL_DIR} is a text substitution, not an environment variable');
+  assert.ok(!skill.includes('--fault-cmd'), 'fault commands are config-only');
+  assert.ok(!/CORS/.test(skill), 'the script never sends an Origin on ordinary requests, so CORS is not a common header');
   assert.ok(front.match(/^description: (.*)$/m)[1].length <= 650, 'the description stays short');
   assert.ok(skill.split('\n').length < 500);
   assert.ok(skill.includes('${CLAUDE_SKILL_DIR}/scripts/http-attack.mjs'));
   assert.ok(!skill.includes('<skill-dir>'));
-  assert.ok(!/allow-remote/i.test(skill), 'the human-only override is not documented to the agent');
+  assert.ok(!/allow[-_]remote/i.test(skill), 'the human-only override is not documented to the agent');
   assert.match(skill, /every remaining one is suppressed in the config with its/);
 });
 

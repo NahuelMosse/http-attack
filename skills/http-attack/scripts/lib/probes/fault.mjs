@@ -25,7 +25,7 @@ export async function faultProbe(run, w) {
   const target = w ? `${w.method} ${w.path}` : 'write';
   const spec = { group: 'faults', probe: 'database-fault', target, name: `${target} with ${how}` };
   const expected = '503 or 500 with the generic error body and the common headers; the process keeps answering';
-  if (!w) return run.notRun(spec, 'a fault probe needs a --write');
+  if (!w) return run.notRun(spec, opts.writes.length ? 'no legitimate write succeeded: the fault probe sends one while the database is broken, so it has nothing to send' : 'a fault probe needs a --write');
   const st = run.settings(w.method, w.path);
 
   let release = () => {};
@@ -41,12 +41,12 @@ export async function faultProbe(run, w) {
     const started = runShell(opts.faultCmd);
     if (started.status !== 0) {
       if (opts.faultRestore) runShell(opts.faultRestore);
-      return run.notRun(spec, `--fault-cmd failed (${started.error?.code ?? `exit ${started.status}`}): ${(started.stderr || started.stdout || '').trim().slice(0, 200)}`);
+      return run.notRun(spec, `faultCmd failed (${started.error?.code ?? `exit ${started.status}`}): ${(started.stderr || started.stdout || '').trim().slice(0, 200)}`);
     }
     release = () => {
       if (!opts.faultRestore) return;
       const restored = runShell(opts.faultRestore);
-      if (restored.status !== 0) process.stderr.write(`--fault-restore failed (exit ${restored.status}): the fault may still be active.\n`);
+      if (restored.status !== 0) process.stderr.write(`faultRestore failed (exit ${restored.status}): the fault may still be active.\n`);
     };
   }
 

@@ -29,7 +29,7 @@ test('a public read route is not a finding when the config says so', () => withS
   const dir = tempDir();
   const flagged = await attack(s.url, [...ALICE, '--write', ITEM, '--read', '/catalog']);
   assert.ok(flagged.has('unauthenticated-access:read-without-credentials:GET /catalog'));
-  const ok = await attack(s.url, [...ALICE, '--write', ITEM, '--read', '/catalog', ...config(dir, { routes: { '/catalog': { public: true } } })]);
+  const ok = await attack(s.url, [...ALICE, '--write', ITEM, '--read', '/catalog', ...config(dir, { routes: { '/catalog': { public: true, reason: 'a public catalogue' } } })]);
   assert.ok(!ok.has('unauthenticated-access:read-without-credentials:GET /catalog'));
   assert.equal(ok.row('skipped:read-without-credentials:GET /catalog')?.verdict, 'skipped');
 }));
@@ -68,7 +68,7 @@ test('duplicates: distinct stored items are critical, one item behind several 2x
     const dir = tempDir();
     const r = await attack(s.url, [...ALICE, ...unique]);
     assert.ok(r.has('duplicates-stored:race-identical-creates:POST /things'));
-    const flagged = await attack(s.url, [...ALICE, ...unique, ...config(dir, { routes: { '/things': { idempotentCreate: true } } })]);
+    const flagged = await attack(s.url, [...ALICE, ...unique, ...config(dir, { routes: { '/things': { idempotentCreate: true, reason: 'ON CONFLICT DO NOTHING' } } })]);
     assert.ok(!flagged.has('duplicates-stored:race-identical-creates:POST /things'), 'idempotentCreate suppresses the check');
   });
   await withServer({ idempotentCreate: true }, async (s) => {
@@ -131,17 +131,30 @@ test('Rails-style 422 on a foreign Origin is a CSRF refusal', async () => {
   });
 });
 
-test('--fault-cmd and --fault-restore: the fault is injected, the 5xx judged, the fault always restored', () => {
+test('faultCmd and faultRestore (config only): the fault is injected, the 5xx judged, the fault always restored', () => {
   const dir = tempDir();
   const flag = join(dir, 'fault.flag');
   const toggle = join(SKILL, '..', '..', 'test', 'helpers', 'toggle.mjs');
   return withServer({ faultFile: flag }, async (s) => {
     const r = await attack(s.url, [...ALICE, '--write', ITEM,
-      '--fault-cmd', `node "${toggle}" on "${flag}"`, '--fault-restore', `node "${toggle}" off "${flag}"`]);
+      ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"`, faultRestore: `node "${toggle}" off "${flag}"` })]);
     assert.equal(r.byProbe('database-fault')[0].verdict, 'pass');
     assert.ok(!existsSync(flag), 'the restore command ran');
-    const broken = await attack(s.url, [...ALICE, '--write', ITEM, '--fault-cmd', 'node -e "process.exit(3)"', '--fault-restore', `node "${toggle}" off "${flag}"`]);
+    const broken = await attack(s.url, [...ALICE, '--write', ITEM,
+      ...config(dir, { faultCmd: 'node -e "process.exit(3)"', faultRestore: `node "${toggle}" off "${flag}"` })]);
     assert.equal(broken.byProbe('database-fault')[0].verdict, 'not-run', 'a fault command that fails is NOT RUN');
+  });
+});
+
+test('the fault probe is NOT RUN, and the command never runs, when no legitimate write succeeded', () => {
+  const dir = tempDir();
+  const flag = join(dir, 'fault.flag');
+  const toggle = join(SKILL, '..', '..', 'test', 'helpers', 'toggle.mjs');
+  return withServer({ faultFile: flag }, async (s) => {
+    const r = await attack(s.url, [...ALICE, '--write', 'POST /items {"nope":1}', ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"` })]);
+    assert.equal(r.byProbe('database-fault')[0].verdict, 'not-run');
+    assert.match(r.byProbe('database-fault')[0].evidence, /no legitimate write succeeded/);
+    assert.ok(!existsSync(flag), 'the fault command did not run');
   });
 });
 

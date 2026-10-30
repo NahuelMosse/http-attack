@@ -34,8 +34,8 @@ Expectations
 
 Faults and durability
   --fault-sqlite <file>              holds BEGIN EXCLUSIVE on the app's SQLite file while the first --write is sent.
-  --fault-cmd "<command>"            any other fault: a shell command that breaks the database (docker pause db).
-  --fault-restore "<command>"        a shell command that undoes --fault-cmd; always run afterwards.
+                                     Any other fault (docker pause db) is a shell command and is only read from the config
+                                     file (faultCmd, faultRestore), never from the command line.
   --persist-save <file>              create one item through the first --write, save how to read it back, then stop.
   --persist-verify <file>            after a restart, read the saved item back and compare it.
 
@@ -68,7 +68,12 @@ export const unmangle = (value, env = process.env) => {
   for (const root of unixRoots(env)) if (slashed.toLowerCase().startsWith(`${root}/`)) return slashed.slice(root.length);
   return slashed.replace(/^[A-Za-z]:\/.*?\/(?:Git|msys64|msys32)\//i, '/');
 };
-export const toPath = (value, env) => '/' + unmangle(value, env).replace(/^\/+/, '');
+// A request path is printable ASCII: a space or a non-ASCII character would crash the HTTP client, so it is rejected here.
+export const toPath = (value, env) => {
+  const path = '/' + unmangle(value, env).replace(/^\/+/, '');
+  if (/[^\x21-\x7e]/.test(path)) throw new UsageError(`"${path}" is not a valid request path: percent-encode spaces and non-ASCII characters (a%20b).`);
+  return path;
+};
 
 const HEADER_NAME = /^[a-z0-9!#$%&'*+.^_`|~-]+$/;
 const headerInto = (target, line, flag) => {
@@ -84,12 +89,21 @@ export const readBodyFile = (name, cwd, flag) => {
 };
 
 // A body that looks like JSON (or is sent as a JSON media type) must parse: a mangled body never goes out silently.
-export const checkBody = (body, contentType, flag) => {
+// Where a JSON parse error is, without the text around it (a file may hold secrets).
+export const errorPosition = (e) => {
+  const m = String(e.message).match(/position (\d+)(?: \(line (\d+) column (\d+)\))?/);
+  return m ? `at position ${m[1]}${m[2] ? ` (line ${m[2]}, column ${m[3]})` : ''}` : 'at an unknown position';
+};
+
+// `source` names a file when the body came from one: the message then shows the position, never the content.
+export const checkBody = (body, contentType, flag, source) => {
   if (!body) return;
   if (!/^[{[]/.test(body) && !/json/i.test(contentType ?? '')) return;
   try { JSON.parse(body); } catch (e) {
-    throw new UsageError(`${flag}: the body is not valid JSON (${e.message}).\nreceived: ${body.slice(0, 300)}\n`
-      + 'PowerShell 5.1 strips the quotes of inline JSON: put the body in a file and pass "<METHOD> <path> @body.json".');
+    throw new UsageError(source
+      ? `${flag}: ${source} is not valid JSON, ${errorPosition(e)}.`
+      : `${flag}: the body is not valid JSON, ${errorPosition(e)}.\nreceived: ${body.slice(0, 300)}\n`
+        + 'PowerShell 5.1 strips the quotes of inline JSON: put the body in a file and pass "<METHOD> <path> @body.json".');
   }
 };
 
@@ -98,14 +112,15 @@ export const requestSpec = (text, flag, { cwd, env, contentType }) => {
   need(method && path, `${flag} wants "<METHOD> <path> <body>", got "${text ?? ''}".`);
   need(/^[A-Za-z]+$/.test(method), `${flag}: "${method}" is not an HTTP method.`);
   let body = rest.join(' ');
-  if (body.startsWith('@')) body = readBodyFile(body.slice(1), cwd, flag);
-  checkBody(body, contentType, flag);
+  const fromFile = body.startsWith('@') ? body.slice(1) : null;
+  if (fromFile) body = readBodyFile(fromFile, cwd, flag);
+  checkBody(body, contentType, flag, fromFile && `the body file "${fromFile}"`);
   return { method: method.toUpperCase(), path: toPath(path, env), body, contentType };
 };
 
 export const FLAGS_WITH_VALUE = new Set(['--write', '--read', '--search', '--unique', '--item-path', '--vary', '--content-type', '--header',
   '--auth-env', '--auth-header-name', '--other-header', '--other-auth-env', '--common-headers', '--raw-exempt', '--body-limit', '--config',
-  '--fault-sqlite', '--fault-cmd', '--fault-restore', '--persist-save', '--persist-verify', '--race-count', '--race-attempts',
+  '--fault-sqlite', '--persist-save', '--persist-verify', '--race-count', '--race-attempts',
   '--hang-ms', '--format']);
 
 const LOOPBACK = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\]|[\w-]+\.localhost)$/i;
@@ -159,8 +174,6 @@ export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {})
       case '--body-limit': opt.bodyLimit = intFlag(flag, value, 16, 2 ** 31); break;
       case '--config': opt.config = value; break;
       case '--fault-sqlite': opt.faultSqlite = value; break;
-      case '--fault-cmd': opt.faultCmd = value; break;
-      case '--fault-restore': opt.faultRestore = value; break;
       case '--persist-save': opt.persistSave = value; break;
       case '--persist-verify': opt.persistVerify = value; break;
       case '--race-count': opt.raceCount = intFlag(flag, value, 2, 64); break;
@@ -170,8 +183,8 @@ export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {})
       default: throw new UsageError(`Unknown option ${flag}.`);
     }
   }
+  need(!Object.keys(opt.otherHeaders).length || !Object.entries(opt.otherHeaders).every(([k, v]) => opt.headers[k] === v),
+    'The credentials for user B are the same credentials as user A: the ownership rows would prove nothing.');
   for (const [list, flag, value] of pendingRequests) opt[list].push(requestSpec(value, flag, { cwd, env, contentType: opt.contentType }));
-  need(!opt.faultRestore || opt.faultCmd, '--fault-restore needs --fault-cmd.');
-  need(!(opt.faultSqlite && opt.faultCmd), 'Use either --fault-sqlite or --fault-cmd.');
   return { help: false, base, opt };
 }

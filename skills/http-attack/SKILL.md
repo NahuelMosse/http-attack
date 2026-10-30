@@ -1,7 +1,6 @@
 ---
 name: http-attack
 description: Break-test an HTTP API the user runs locally before shipping it. Sends malformed bodies, hostile paths, raw parser errors, concurrent duplicate creates, never-ending bodies, LIKE/SQL injection in search, database faults, missing auth, IDOR and CSRF, and reports each failure with its severity and the correct response. Use when asked to attack, harden, fuzz or break-test a local API, or to check it never answers 500. Not for code review, load tests, OpenAPI conformance, or hosts the user does not own.
-allowed-tools: Bash(node ${CLAUDE_SKILL_DIR}/scripts/*)
 ---
 
 # http-attack
@@ -24,7 +23,7 @@ against the real server, and reports each failure with its severity and the resp
    stores), *update/delete*, *read one* (`/items/{id}`), *list*, *search* (list with a free-text parameter). Note per route: the
    auth scheme (bearer, cookie, API key, custom header), the unique keys of the stored entity, the body limit, the
    database, the maximum header size, whether the route is public by design, and the headers every response must carry
-   (request id, CORS, `Cache-Control`, security headers).
+   (request id, `Cache-Control`, security headers).
 2. **Start the app** on a free port with the scratch database and get credentials for two users (see below).
 3. **Run the script** (below) with one `--write` per create/update route, `--read` per list, `--search` per search route,
    `--unique` per create guarded by a unique key.
@@ -56,11 +55,11 @@ Windows PowerShell (5.1 strips the quotes inside inline JSON, so put bodies in f
 
 ```powershell
 Set-Content -Encoding ascii body.json '{"name":"Ana","email":"ana@example.com"}'
-node "${env:CLAUDE_SKILL_DIR}\scripts\http-attack.mjs" http://127.0.0.1:3000 `
+node "${CLAUDE_SKILL_DIR}\scripts\http-attack.mjs" http://127.0.0.1:3000 `
   --header "Authorization: Bearer $env:TOKEN_A" --write "POST /items @body.json" --read "/items?limit=10"
 ```
 
-An inline JSON body that does not parse exits 2 and shows what arrived. `node scripts/http-attack.mjs --help` lists every option.
+An inline JSON body that does not parse exits 2 and shows what arrived. `node "${CLAUDE_SKILL_DIR}/scripts/http-attack.mjs" --help` lists every option.
 Notes:
 
 - Zero dependencies; Node 22.13 or newer.
@@ -69,9 +68,11 @@ Notes:
 - `--content-type application/vnd.api+json` for non-default media types; `--auth-header-name X-Auth-Token` when credentials
   travel in a custom header; `--auth-env VAR` / `--other-auth-env VAR` keep tokens off the command line.
 - Cookie authentication: add `--csrf` and pass the cookie with `--header "Cookie: ..."`.
-- Persistence is a two-step run around a restart: `--persist-save state.json`, restart the app, `--persist-verify state.json`.
-- Other databases: `--fault-cmd "docker pause db" --fault-restore "docker unpause db"` (any shell command that breaks the
-  database, and the one that heals it; the restore always runs).
+- Persistence is a two-step run around a restart: `--persist-save state.json`, restart the app, `--persist-verify state.json` (the file must be inside the working or temp
+  directory, or the config must name its directory in `persistDir`).
+- Other databases: `faultCmd` (`"docker pause db"`) and `faultRestore` (`"docker unpause db"`) in the config file: any shell
+  command that breaks the database and the one that heals it (the restore always runs). They are read only from the config
+  file, never from the command line, because they run a shell: have the user review them before the run.
 - On Git Bash for Windows set `MSYS_NO_PATHCONV=1` so `/items` is not rewritten into a Windows path, and give the app and
   `--fault-sqlite` the same absolute Windows path (`D:/app/data/app.db`).
 
@@ -82,16 +83,18 @@ signs a token for two different user ids works. The ownership rows need both; wi
 ## Config file
 
 `http-attack.config.json` in the project (or `--config <path>`) holds what the command line cannot say. Per-route settings
-go under `routes` (key `"/items"` or `"POST /items"`), top-level keys apply to every route:
+go under `routes` (key `"/items"`, `"POST /items"` or a template such as `"/items/{id}"`); `bodyLimit`, `maxHeaderBytes`,
+`invalidUtf8`, `vary` and `contentType` may also be given at the top level for every route. `public` and `idempotentCreate` relax
+a check, so they are accepted only inside one route and only with a `reason`:
 
 ```json
 {
   "bodyLimit": 65536,
   "commonHeaders": ["x-request-id", "cache-control"],
   "routes": {
-    "/catalog": { "public": true },
+    "/catalog": { "public": true, "reason": "public read-only catalogue" },
     "/imports": { "bodyLimit": 10485760, "invalidUtf8": "replace" },
-    "POST /things": { "idempotentCreate": true }
+    "POST /things": { "idempotentCreate": true, "reason": "ON CONFLICT DO NOTHING answers 200 with the same item" }
   },
   "ignore": [
     { "id": "parser-accepted:big-header:raw", "reason": "the load balancer in front caps headers at 1 MB" }
@@ -101,15 +104,15 @@ go under `routes` (key `"/items"` or `"POST /items"`), top-level keys apply to e
 
 | Setting | Meaning |
 |---|---|
-| `public` | reads and writes without credentials are expected to succeed |
+| `public` + `reason` | reads and writes of this route without credentials are expected to succeed (the reason is mandatory) |
 | `bodyLimit` | the documented limit in bytes: the never-ending body sends limit+1 bytes, the multibyte probe is built from it |
 | `maxHeaderBytes` | the app's header limit: the oversized-header probe sends limit+1 KB |
 | `invalidUtf8` | `reject` (default) or `replace` (the parser substitutes U+FFFD by design) |
-| `idempotentCreate` | several 2xx for one key are expected (`ON CONFLICT DO NOTHING`) |
+| `idempotentCreate` + `reason` | several 2xx for one key are expected (`ON CONFLICT DO NOTHING`); the reason is mandatory |
 | `vary`, `contentType` | as the flags |
-| `ignore` | `{id, reason}`: `id` is a finding id (shown in every report row), a rule name (`stack-leak`), or a prefix ending in `*`. A reason is mandatory |
+| `ignore` | `{id, reason}`: `id` is a finding id (shown in every report row), a rule name (`stack-leak`), or `<rule>:<prefix>*`. It must start with a known rule and a reason is mandatory |
 
-The config can also list `writes`, `reads`, `searches`, `uniques` (bodies as objects or `"@file"`) and `persistIgnore`
+The config can also hold `faultCmd`, `faultRestore`, `persistDir`, and list `writes`, `reads`, `searches`, `uniques` (bodies as objects or `"@file"`) and `persistIgnore`
 (fields skipped when comparing the persisted item).
 
 ## Reading the report
@@ -162,7 +165,7 @@ Every rule the script can emit; the finding id is `<rule>:<probe>:<target>`.
 | parser (raw socket) | `GARBAGE` request line, non-ASCII bytes in the path, an oversized header, `Content-Length` with `Transfer-Encoding` | 400/431 with the common headers, connection closed |
 | resources | 50 MB `text/plain` to a JSON route, a chunked body that never ends (sends limit+1 bytes) | 415 at the first bytes; 413 at the limit or 408/close |
 | concurrency | N identical creates released together (last-byte sync) | exactly one 201, the rest 409 |
-| faults | a legitimate write while the database is locked or broken (`--fault-sqlite`, `--fault-cmd`) | 503/500 with a generic body, the process keeps answering |
+| faults | a legitimate write while the database is locked or broken (`--fault-sqlite`, or `faultCmd` in the config) | 503/500 with a generic body, the process keeps answering |
 | auth | each write and read without credentials; user B reads and deletes A's item (after checking B can use its own) | 401 (or a redirect to login); 404/403 for B |
 | csrf | write with a foreign `Origin`, another port of the same host, `Origin: null` | 4xx |
 | durability | create, restart, read back | same status and body |

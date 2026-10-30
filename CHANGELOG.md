@@ -11,7 +11,7 @@ Adversarial probes against an HTTP API running on the local machine, as a Claude
 - `http-attack.config.json`: per-route expectations (`public`, `bodyLimit`, `maxHeaderBytes`, `invalidUtf8`,
   `idempotentCreate`, `vary`, `contentType`) and suppressions with a mandatory reason.
 - Exit codes: 0 no findings, 1 findings, 2 the run could not complete (crash, invalid argument, app down, no probe run, probe not run).
-- Fault injection with `--fault-sqlite` or any shell command (`--fault-cmd`, `--fault-restore`).
+- Fault injection with `--fault-sqlite`, or with any shell command set as `faultCmd`/`faultRestore` in the config file (never on the command line).
 - Bodies from files (`@body.json`) for Windows PowerShell 5.1, nested bodies (`--vary` JSON pointer), custom media types and
   custom authentication headers.
-- Loopback only; `HTTP_ATTACK_ALLOW_REMOTE=1` is the sole override. Zero runtime dependencies; Node 22.13 or newer.
+- Loopback hosts only. Zero runtime dependencies; Node 22.13 or newer.

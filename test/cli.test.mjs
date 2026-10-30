@@ -1,13 +1,17 @@
 // The command line contract: exit codes, argument validation, safety, the entry guard through a link, persistence.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { pathToFileURL } from 'node:url';
+import { dirname, join } from 'node:path';
 import { ALICE, CLI, ITEM, SKILL, runCli, tempDir, writeTemp } from './helpers/cli.mjs';
 import { startQuirkServer } from './helpers/quirk-server.mjs';
 import { parseBase, toPath, unmangle } from '../skills/http-attack/scripts/lib/args.mjs';
 import { exitCode, summarize } from '../skills/http-attack/scripts/lib/report.mjs';
+import { checkPersistPath } from '../skills/http-attack/scripts/lib/probes/persist.mjs';
 import { createClient } from '../skills/http-attack/scripts/lib/http.mjs';
 
 const URL_ = 'http://127.0.0.1:9';
@@ -15,8 +19,9 @@ const URL_ = 'http://127.0.0.1:9';
 test('--help prints every option and exits 0', async () => {
   const r = await runCli(['--help']);
   assert.equal(r.code, 0);
-  for (const flag of ['--write', '--fault-cmd', '--fault-restore', '--config', '--auth-header-name', '--vary', '--content-type', '--race-count']) assert.match(r.stdout, new RegExp(flag));
-  assert.doesNotMatch(r.stdout, /allow-remote/);
+  for (const flag of ['--write', '--fault-sqlite', '--config', '--auth-header-name', '--vary', '--content-type', '--race-count']) assert.match(r.stdout, new RegExp(flag));
+  assert.doesNotMatch(r.stdout, /allow[-_]remote/i);
+  assert.doesNotMatch(r.stdout, /--fault-cmd|--fault-restore/, 'shell commands are not accepted on the command line');
 });
 
 test('invalid invocations exit 2 with a message', async () => {
@@ -24,7 +29,8 @@ test('invalid invocations exit 2 with a message', async () => {
     [[], /base URL/], [['http://['], /not a valid URL/], [['http://localhost:99999'], /not a valid URL/], [['ftp://localhost'], /base URL/],
     [[URL_, '--nope'], /Unknown option --nope/], [[URL_, '--allow-remote'], /Unknown option/], [[URL_, '--body-limit', 'abc'], /whole number/],
     [[URL_, '--body-limit'], /needs a value/], [[URL_, '--race-count', '1'], /between 2 and 64/], [[URL_, '--format', 'xml'], /text or json/],
-    [[URL_, '--write', 'POST'], /wants/], [[URL_, '--header', 'nocolon'], /Name: value/], [[URL_, '--fault-restore', 'x'], /needs --fault-cmd/],
+    [[URL_, '--write', 'POST'], /wants/], [[URL_, '--header', 'nocolon'], /Name: value/], [[URL_, '--fault-cmd', 'x'], /Unknown option --fault-cmd/], [[URL_, '--fault-restore', 'x'], /Unknown option --fault-restore/],
+    [[URL_, '--read', '/items?q=a b'], /not a valid request path/], [[URL_, '--search', '/ñ q'], /not a valid request path/],
     [['http://192.168.1.10:3000'], /not loopback/], [['http://localhost.attacker.com'], /not loopback/], [['http://127.0.0.1.nip.io'], /not loopback/],
     [[URL_, '--config', join(tempDir(), 'missing.json')], /cannot read the config/],
   ];
@@ -62,7 +68,14 @@ test('a malformed config exits 2: unknown key, ignore without a reason, unknown 
   for (const [obj, message] of [
     [{ typo: 1 }, /unknown key "typo"/],
     [{ ignore: [{ id: 'server-error:x:y' }] }, /non-empty "reason"/],
-    [{ ignore: [{ id: 'not-a-rule:x', reason: 'r' }] }, /not a rule/],
+    [{ ignore: [{ id: '*', reason: 'everything' }] }, /does not start with a known rule/],
+    [{ ignore: [{ id: 'server-*', reason: 'x' }] }, /does not start with a known rule/],
+    [{ public: true, reason: 'x' }, /only allowed inside "routes"/],
+    [{ idempotentCreate: true }, /only allowed inside "routes"/],
+    [{ routes: { '/a': { public: true } } }, /needs a non-empty "reason"/],
+    [{ routes: { '/a': { idempotentCreate: true, reason: ' ' } } }, /needs a non-empty "reason"/],
+    [{ faultRestore: 'x' }, /needs "faultCmd"/],
+    [{ ignore: [{ id: 'not-a-rule:x', reason: 'r' }] }, /does not start with a known rule/],
     [{ routes: { '/a': { invalidUtf8: 'maybe' } } }, /reject.*replace/],
   ]) {
     const r = await runCli([URL_, '--config', writeTemp(dir, 'c.json', JSON.stringify(obj))]);
@@ -71,7 +84,16 @@ test('a malformed config exits 2: unknown key, ignore without a reason, unknown 
   }
   const broken = await runCli([URL_, '--config', writeTemp(dir, 'bad.json', '{"a":')]);
   assert.equal(broken.code, 2);
-  assert.match(broken.stderr, /received: \{"a":/);
+  assert.match(broken.stderr, /not valid JSON, at (an unknown )?position/);
+  assert.doesNotMatch(broken.stderr, /received/, 'the file content is not echoed');
+  const secret = writeTemp(dir, 'secret.json', '{"token":"hunter2",}');
+  const fromFile = await runCli([URL_, '--write', `POST /items @${secret}`]);
+  assert.equal(fromFile.code, 2);
+  assert.match(fromFile.stderr, /not valid JSON, at (an unknown )?position/);
+  assert.doesNotMatch(fromFile.stderr, /hunter2/, 'a body file is never echoed');
+  const viaConfig = await runCli([URL_, '--config', writeTemp(dir, 'cfg2.json', JSON.stringify({ writes: [{ path: '/items', body: `@${secret}` }] }))]);
+  assert.equal(viaConfig.code, 2);
+  assert.doesNotMatch(viaConfig.stderr, /hunter2/);
 });
 
 test('the Git Bash path rewrite is undone for --item-path and routes', () => {
@@ -150,3 +172,33 @@ test('persistence: save, verify, a missing file and volatile fields', async () =
   } finally { await s.close(); }
 });
 
+
+test('the state file of --persist-save must stay in the working directory or the temp directory unless the config allows its directory', async () => {
+  const outside = join(homedir(), 'http-attack-forbidden', 'state.json');
+  const r = await runCli([URL_, '--persist-verify', outside]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /outside the working directory.*persistDir/);
+  const viaDotDot = await runCli([URL_, '--persist-verify', join(tempDir(), '..', '..', 'escape.json')]);
+  assert.equal(viaDotDot.code, 2);
+  assert.throws(() => checkPersistPath(outside, { persistDir: undefined }, tempDir()), /persistDir/);
+  assert.doesNotThrow(() => checkPersistPath(outside, { persistDir: dirname(outside) }, tempDir()));
+  assert.doesNotThrow(() => checkPersistPath(join(tempDir(), 'inside.json'), {}, process.cwd()));
+});
+
+test('credentials for user B identical to user A are refused', async () => {
+  const same = await runCli([URL_, ...ALICE, '--other-header', 'Authorization: Bearer alice']);
+  assert.equal(same.code, 2);
+  assert.match(same.stderr, /same credentials as user A/);
+});
+
+test('an entry point whose path cannot be resolved still runs and never exits 0 silently', async () => {
+  const href = pathToFileURL(CLI).href;
+  const r = await new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(href)})`]);
+    let stderr = '';
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('close', (code) => resolve({ code, stderr }));
+  });
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /base URL/);
+});

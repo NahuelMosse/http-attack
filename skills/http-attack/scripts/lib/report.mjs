@@ -26,7 +26,7 @@ export function exitCode(summary) {
 
 const ORDER = Object.fromEntries(SEVERITIES.map((s, i) => [s, i]));
 
-export function renderJson({ base, rows, summary, unusedIgnores }) {
+export function renderJson({ base, rows, summary, unusedIgnores, unusedRoutes = [] }) {
   const findings = rows.filter((r) => r.verdict === 'fail').sort((a, b) => ORDER[a.severity] - ORDER[b.severity]);
   return JSON.stringify({
     schemaVersion: SCHEMA_VERSION,
@@ -34,6 +34,7 @@ export function renderJson({ base, rows, summary, unusedIgnores }) {
     summary: { ...summary, exitCode: exitCode(summary) },
     findings: findings.map((r) => r.id),
     unusedIgnores: unusedIgnores.map((i) => i.id),
+    unusedRoutes,
     rows: rows.map(({ id, rule, group, probe, target, name, verdict, severity, got, expected, evidence, was, suppressedBy }) =>
       ({ id, rule: rule ?? null, group, probe, target, name, verdict, severity: severity ?? null, got: got ?? '', expected: expected ?? '', evidence: evidence ?? null, was: was ?? null, suppressedBy: suppressedBy ?? null })),
   }, null, 2);
@@ -41,7 +42,7 @@ export function renderJson({ base, rows, summary, unusedIgnores }) {
 
 const MARK = { fail: (r) => `FAIL ${r.severity.padEnd(8)}`, 'not-run': () => 'NOT RUN      ', pass: () => 'pass         ', skipped: () => 'skipped      ', suppressed: () => 'suppressed   ' };
 
-export function renderText({ rows, summary, unusedIgnores }) {
+export function renderText({ rows, summary, unusedIgnores, unusedRoutes = [] }) {
   const out = [];
   const pad = ' '.repeat(20);
   for (const r of rows) {
@@ -54,6 +55,7 @@ export function renderText({ rows, summary, unusedIgnores }) {
     out.push(`${pad}id: ${r.id}`);
   }
   for (const i of unusedIgnores) out.push(`warning: the ignore "${i.id}" matched nothing`);
+  for (const k of unusedRoutes) out.push(`warning: the route settings "${k}" matched no request`);
   const s = summary;
   out.push('', `${s.run} probes run - ${s.failed} findings (critical ${s.bySeverity.critical}, high ${s.bySeverity.high}, medium ${s.bySeverity.medium}, low ${s.bySeverity.low})`
     + ` - ${s.suppressed} suppressed - ${s.notRun} not run${s.skipped ? ` - ${s.skipped} skipped by configuration` : ''}`);

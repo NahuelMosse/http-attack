@@ -60,9 +60,9 @@ example `server-error:path-param-letters:GET /items/{id}`; it never contains gen
   "authHeaderNames": ["x-auth-token"],
   "itemPath": "/items/{id}",
   "routes": {
-    "/catalog": { "public": true },
+    "/catalog": { "public": true, "reason": "public read-only catalogue" },
     "POST /imports": { "bodyLimit": 10485760, "invalidUtf8": "replace" },
-    "POST /things": { "idempotentCreate": true }
+    "POST /things": { "idempotentCreate": true, "reason": "ON CONFLICT DO NOTHING answers 200 with the same item" }
   },
   "ignore": [{ "id": "parser-accepted:big-header:raw", "reason": "the load balancer caps headers at 1 MB" }]
 }
@@ -70,16 +70,18 @@ example `server-error:path-param-letters:GET /items/{id}`; it never contains gen
 
 | Key | Meaning |
 |---|---|
-| `public` | reads and writes without credentials are expected to succeed |
+| `public` | for one route: reads and writes without credentials are expected to succeed. Needs a `reason` |
 | `bodyLimit` | the documented body limit in bytes |
 | `maxHeaderBytes` | the app's header limit; the oversized-header probe sends limit + 1 KB |
 | `invalidUtf8` | `reject` (default) or `replace` (the parser substitutes U+FFFD by design) |
-| `idempotentCreate` | several 2xx for one key are expected |
+| `idempotentCreate` | for one route: several 2xx for one key are expected. Needs a `reason` |
 | `vary`, `contentType` | the body field that keeps requests apart (JSON pointer), the media type of write bodies |
-| `routes` | the settings above per path (`"/items"`) or per request (`"POST /items"`); top-level keys are defaults |
+| `routes` | the settings above per path (`"/items"`), per request (`"POST /items"`) or per template (`"/items/{id}"`); `public` and `idempotentCreate` exist only here. `bodyLimit`, `maxHeaderBytes`, `invalidUtf8`, `vary`, `contentType` may also be top-level defaults |
 | `commonHeaders`, `rawExempt`, `authHeaderNames`, `itemPath`, `persistIgnore` | as the flags of the same name |
+| `faultCmd`, `faultRestore` | shell commands that break and heal the database (`docker pause db`). Config only, never a flag, because they run a shell |
+| `persistDir` | a directory outside the working and temp directories where `--persist-save` may write |
 | `writes`, `reads`, `searches`, `uniques` | the routes to attack; bodies as objects or `"@file"` |
-| `ignore` | `{ id, reason }`: a finding id, a rule name, or a prefix ending in `*`. The reason is mandatory |
+| `ignore` | `{ id, reason }`: a finding id, a rule name, or `<rule>:<prefix>*`; it must start with a known rule. The reason is mandatory |
 
 ## CI
 
