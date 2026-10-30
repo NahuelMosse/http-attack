@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,5 +38,8 @@ export async function attack(url, args, options) {
   return { ...r, report, row, byProbe, findings: report.findings, has: (id) => report.findings.includes(id) };
 }
 
-export const tempDir = () => mkdtempSync(join(tmpdir(), 'http-attack-test-'));
+// Every directory made here is removed when the test process exits.
+const made = [];
+process.on('exit', () => { for (const d of made) { try { rmSync(d, { recursive: true, force: true }); } catch { /* still held open: the OS cleans the temp dir */ } } });
+export const tempDir = () => { const d = mkdtempSync(join(tmpdir(), 'http-attack-test-')); made.push(d); return d; };
 export const writeTemp = (dir, name, content) => { const p = join(dir, name); writeFileSync(p, content); return p; };

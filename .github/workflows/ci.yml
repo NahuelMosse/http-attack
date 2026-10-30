@@ -35,13 +35,16 @@ jobs:
         shell: powershell
         run: |
           $PSVersionTable.PSVersion
-          $app = Start-Process node -ArgumentList 'skills/http-attack/fixtures/fixed-server.mjs','3917',"$env:RUNNER_TEMPapp.db" -PassThru
+          $db = Join-Path $env:RUNNER_TEMP 'app.db'
+          $bodyFile = Join-Path $env:RUNNER_TEMP 'body.json'
+          $reportFile = Join-Path $env:RUNNER_TEMP 'report.json'
+          $app = Start-Process node -ArgumentList 'skills/http-attack/fixtures/fixed-server.mjs','3917',$db -PassThru
           Start-Sleep -Seconds 3
-          Set-Content -Path "$env:RUNNER_TEMPody.json" -Value '{"name":"Ana","email":"ana@example.com"}'
-          node skills/http-attack/scripts/http-attack.mjs http://127.0.0.1:3917 --header "Authorization: Bearer alice" --other-header "Authorization: Bearer bob" --write "POST /items @$env:RUNNER_TEMPody.json" --format json | Out-File "$env:RUNNER_TEMPeport.json" -Encoding utf8
+          Set-Content -Path $bodyFile -Value '{"name":"Ana","email":"ana@example.com"}'
+          node skills/http-attack/scripts/http-attack.mjs http://127.0.0.1:3917 --header "Authorization: Bearer alice" --other-header "Authorization: Bearer bob" --write "POST /items @$bodyFile" --format json | Out-File $reportFile -Encoding utf8
           $code = $LASTEXITCODE
           Stop-Process -Id $app.Id -ErrorAction SilentlyContinue
-          $r = Get-Content "$env:RUNNER_TEMPeport.json" -Raw | ConvertFrom-Json
+          $r = Get-Content $reportFile -Raw | ConvertFrom-Json
           if (-not ($r.rows | Where-Object { $_.id -eq 'ok:legit-write:POST /items' })) { throw 'the legitimate write from the body file did not pass' }
           if ($code -ne 0) { throw "unexpected findings, exit $code" }
   validate:
