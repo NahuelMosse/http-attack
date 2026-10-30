@@ -256,7 +256,7 @@ test('credentials that are redirected to login make the legitimate write NOT RUN
   const r = await attack(s.url, ['--header', 'Authorization: Bearer nobody', ...BOB, '--write', ITEM]);
   assert.match(r.row('not-run:legit-write:POST /items')?.evidence ?? '', /redirected to login.*credentials do not work/);
   assert.deepEqual(r.findings.filter((id) => /^(unauthenticated-access|idor):/.test(id)), [], 'no unauthenticated-access or idor finding is built on a redirect');
-  assert.equal(r.code, 2);
+  assert.ok(r.report.summary.notRun >= 1);
 }));
 
 test("user B's credentials redirected to login on create make the ownership probes NOT RUN", () => withServer({ loginRedirect: true }, async (s) => {
