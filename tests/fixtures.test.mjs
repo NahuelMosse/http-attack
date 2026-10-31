@@ -35,6 +35,22 @@ test('the fixed fixture answers an oversized body with 413 while the client is s
   } finally { fixture.stop(); }
 });
 
+test('every pinned id of the vulnerable fixture is explained by a defect in its header, and every defect has an id', () => {
+  const header = readFileSync(new URL('../skills/http-attack/fixtures/vulnerable-server.mjs', import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//'));
+  const defects = new Map();
+  let current = null;
+  for (const line of header) {
+    const defect = line.match(/^\/\/ \[(D\d+)\] \S/);
+    if (defect) { current = defect[1]; defects.set(current, []); continue; }
+    const id = line.match(/^\/\/\s+id: (\S.*)$/);
+    if (id) { assert.ok(current, `${id[1]} is listed before any defect`); defects.get(current).push(id[1]); }
+  }
+  for (const [defect, ids] of defects) assert.ok(ids.length > 0, `${defect} produces no id`);
+  const listed = [...defects.values()].flat();
+  assert.equal(new Set(listed).size, listed.length, 'an id is listed under two defects');
+  assert.deepEqual([...listed].sort(), [...expected].sort());
+});
+
 test('the vulnerable fixture reports exactly the pinned set of finding ids', async () => {
   const r = await attackFixture('vulnerable');
   assert.equal(r.code, 1);

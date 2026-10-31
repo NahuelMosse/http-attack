@@ -1,6 +1,87 @@
 // A deliberately broken API, to prove that http-attack finds what it claims to find.
 // node vulnerable-server.mjs <port | 0> <sqlite-file | :memory:>   Users: "Authorization: Bearer alice" / "Bearer bob", or "Cookie: session=alice" / "session=bob".
 // Every defect below is one the script must report. Do not copy this code.
+//
+// Defects and the finding ids each produces. tests/expected-vulnerable.json pins the same ids; a test keeps both in step.
+// A 5xx that leaks a stack is two ids on purpose: server-error (the app failed) and stack-leak (what the body disclosed).
+//
+// [D1] a "//" or "%" in the path throws in the URL parsing, and "//items" is not "/items"
+//   id: server-error:double-slash:GET /
+//   id: stack-leak:double-slash:GET /
+//   id: double-slash-mismatch:double-slash:GET /items
+//   id: double-slash-mismatch:double-slash:GET /notes
+//   id: server-error:percent-path:GET /
+//   id: server-error:percent-path:GET /items
+//   id: server-error:percent-path:GET /notes
+//   id: stack-leak:percent-path:GET /
+//   id: stack-leak:percent-path:GET /items
+//   id: stack-leak:percent-path:GET /notes
+// [D2] a POST without Content-Type crashes the handler
+//   id: server-error:no-content-type:POST /items
+//   id: stack-leak:no-content-type:POST /items
+// [D3] the "limit" parameter goes into the SQL unchecked, so a huge or negative one is a SQL error
+//   id: server-error:number-limit-999999:GET /items?limit=10
+//   id: server-error:number-limit--99999:GET /items?limit=10
+//   id: stack-leak:number-limit-999999:GET /items?limit=10
+//   id: stack-leak:number-limit--99999:GET /items?limit=10
+// [D4] the search term is concatenated into the SQL: wildcards pass through, a quote breaks it, an injected OR returns rows
+//   id: server-error:quote-single:GET /items
+//   id: stack-leak:quote-single:GET /items
+//   id: sql-injection:injection-or-number:GET /items
+//   id: sql-injection:injection-or-string:GET /items
+//   id: wildcard-unescaped:percent:GET /items
+//   id: wildcard-unescaped:underscore:GET /items
+// [D5] check-then-insert without a transaction: the UNIQUE violation of a race escapes as a 500
+//   id: server-error:race-identical-creates:POST /items
+//   id: stack-leak:race-identical-creates:POST /items
+// [D6] /notes has no authentication and no owner: anyone reads it, and user B reads what user A created
+//   id: unauthenticated-access:write-without-credentials:POST /notes
+//   id: unauthenticated-access:item-without-credentials:GET /notes/{id}
+//   id: idor:idor-get:GET /notes/{id}
+// [D7] /notes has no unique key: identical creates are all stored
+//   id: duplicates-stored:race-identical-creates:POST /notes
+// [D8] no Origin check on writes (CSRF)
+//   id: csrf:origin-another-site:POST /items
+//   id: csrf:origin-another-port:POST /items
+//   id: csrf:origin-null-origin:POST /items
+//   id: csrf:origin-another-site:POST /notes
+//   id: csrf:origin-another-port:POST /notes
+//   id: csrf:origin-null-origin:POST /notes
+// [D9] no body limit: a large body and a body that never ends are read whole
+//   id: no-body-limit:body-1mb:POST /items
+//   id: no-body-limit:body-1mb:POST /notes
+//   id: no-body-limit:body-never-ends:POST /items
+//   id: no-body-limit:body-never-ends:POST /notes
+// [D10] the body is read before the Content-Type is looked at (/notes never looks at it)
+//   id: read-before-reject:text-plain-50mb:POST /items
+//   id: read-before-reject:text-plain-50mb:POST /notes
+// [D11] invalid UTF-8 is replaced silently and a non-string name is coerced
+//   id: accepted-invalid:invalid-utf8:POST /items
+//   id: accepted-invalid:invalid-utf8:POST /notes
+//   id: accepted-invalid:wrong-type-number-name:POST /items
+//   id: accepted-invalid:wrong-type-array-name:POST /items
+//   id: accepted-invalid:wrong-type-object-name:POST /items
+// [D12] the media type is compared case-sensitively
+//   id: media-type-strict:media-type-variant:POST /items
+// [D13] 405 without an Allow header, and HEAD is not supported
+//   id: missing-allow:method-put:POST /items
+//   id: missing-allow:method-delete:POST /items
+//   id: missing-allow:method-patch:POST /items
+//   id: missing-allow:options:OPTIONS /items
+//   id: missing-allow:head:HEAD /items
+//   id: head-unsupported:head:HEAD /items
+// [D14] /items/{id} has no owner check: another user reads and deletes the item
+//   id: idor:idor-get:GET /items/{id}
+//   id: idor:idor-delete:DELETE /items/{id}
+// [D15] the repository is served
+//   id: file-served:file-served:GET /.git/config
+// [D16] no 'clientError' handler: parser-level answers lack the common headers
+//   id: parser-no-common-headers:garbage-request-line:raw
+//   id: parser-no-common-headers:non-ascii-path:raw
+//   id: parser-no-common-headers:big-header:raw
+//   id: parser-no-common-headers:cl-te-conflict:raw
+// [D17] a locked database throws outside the handler and kills the process
+//   id: process-died:database-fault:POST /items
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
