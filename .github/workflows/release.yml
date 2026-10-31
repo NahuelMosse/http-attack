@@ -1,5 +1,6 @@
 # The first version is published manually (npm publish from a maintainer's machine), because npm trusted publishing
-# can only be configured on a package that already exists. Every later version is published from here by pushing a tag.
+# can only be configured on a package that already exists. Every later version is published from here by pushing a tag;
+# a tag whose version is already on npm (the hand-published first one) passes without publishing.
 name: release
 on:
   push:
@@ -37,4 +38,8 @@ jobs:
       - run: npm test
       - name: Publish
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then npm publish; else npm publish --dry-run; fi
+          name=$(node -p "require('./package.json').name")
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then npm publish --dry-run
+          elif [ "$(npm view "$name@$pkg" version 2>/dev/null)" = "$pkg" ]; then echo "$name@$pkg is already on npm (the first version is published by hand): nothing to publish"
+          else npm publish; fi
