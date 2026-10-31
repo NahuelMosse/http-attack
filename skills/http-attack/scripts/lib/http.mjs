@@ -75,8 +75,10 @@ export function createClient(base, opts) {
     const all = { ...creds, ...(data ? { 'content-length': data.length, ...(type ? { 'content-type': type } : {}) } : {}), ...headers };
     let settled = false;
     const settle = (v) => { if (!settled) { settled = true; done(v); } };
+    let answered = false;
     const req = request({ hostname: host, port, path, method, agent: false,
       headers: Object.fromEntries(Object.entries(all).filter(([, v]) => v !== undefined)) }, (res) => {
+      answered = true;
       let text = '';
       res.setEncoding('utf8');
       res.on('data', (d) => { if (text.length < BODY_CAP) text += d; });
@@ -87,7 +89,9 @@ export function createClient(base, opts) {
       res.on('close', () => settle(result({ truncated: !res.complete, err: res.complete ? undefined : 'ECONNRESET' })));
     });
     req.setTimeout(REQUEST_TIMEOUT_MS, () => req.destroy(new Error('timeout')));
-    req.on('error', (e) => settle({ s: null, err: e.code ?? e.message, headers: {}, text: '' }));
+    // Once the status line is in, a write error (EPIPE, ECONNRESET) is the server closing after answering early,
+    // as Node does for a request with "Connection: close": the response events decide the outcome.
+    req.on('error', (e) => answered || settle({ s: null, err: e.code ?? e.message, headers: {}, text: '' }));
     req.end(data ?? undefined);
   });
 

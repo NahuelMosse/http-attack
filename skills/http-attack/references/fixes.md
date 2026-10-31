@@ -75,8 +75,12 @@ These answers come from the HTTP parser, before any middleware.
 
 - Check `Content-Type` before reading the body (415 at the first bytes).
 - A byte limit in the body reader: answer 413 at the limit, then close with a lingering close: keep reading and discard the rest of
-  the body up to a cap (or send `Connection: close` once the response is flushed). An immediate destroy resets the socket and the
-  client loses the 413, notably on Windows and with large bodies. Plus server timeouts: Node `server.requestTimeout`,
+  the body up to a cap. An immediate destroy resets the socket and the client loses the 413, notably with large bodies. In Node
+  (all versions) a response to a request sent with `Connection: close` (any `agent: false` client, curl `-H 'Connection: close'`,
+  HTTP/1.0) destroys the socket as soon as the response finishes, whatever the handler still reads, so consuming the body is not
+  enough: write the 413 with its `Content-Length`, keep draining, and call `res.end()` on the request's `close`. Express and
+  Fastify answering 413 from their body parser do not do this: against such a client the 413 can be lost to a reset (EPIPE
+  / ECONNRESET), which is a limitation of the client's view, not a missing limit. Plus server timeouts: Node `server.requestTimeout`,
   `server.headersTimeout`; Go `ReadHeaderTimeout`, `ReadTimeout`; uvicorn `--timeout-keep-alive` and a proxy `client_body_timeout`;
   Puma `first_data_timeout`.
 

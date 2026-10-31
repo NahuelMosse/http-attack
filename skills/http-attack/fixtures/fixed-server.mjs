@@ -15,8 +15,15 @@ const MAX_PAGE = 100;
 const common = () => ({ 'x-request-id': randomUUID(), 'cache-control': 'no-store' });
 const reply = (res, status, body, extra = {}) => {
   if (res.headersSent) return;
-  res.writeHead(status, { 'content-type': 'application/json', ...common(), ...extra });
-  res.end(body === undefined ? '' : JSON.stringify(body));
+  const payload = body === undefined ? '' : JSON.stringify(body);
+  // A response that finishes while the request body is still arriving, on a connection the client asked to close
+  // (or an HTTP/1.0 one), makes Node destroy the socket right away: unread bytes turn the close into a reset and
+  // the client loses the answer. The response is written in full but finished only once the request is drained.
+  const lingering = status === 413 && !res.req.complete && !res.shouldKeepAlive;
+  res.writeHead(status, { 'content-type': 'application/json', ...(lingering ? { 'content-length': Buffer.byteLength(payload) } : {}), ...common(), ...extra });
+  if (!lingering) return void res.end(payload);
+  res.write(payload);
+  res.req.once('close', () => res.end());
 };
 class HttpError extends Error { constructor(status, body, extra) { super(body.error); Object.assign(this, { status, body, extra }); } }
 // Bearer tokens or a session cookie (session=alice / session=bob): the cookie is what the CSRF probes attack.
@@ -34,7 +41,7 @@ const readJson = (req) => new Promise((done, fail) => {
     parts.push(d);
   });
   req.on('end', () => {
-    if (over) { req.socket.end(); return; } // everything was read: closing now does not reset the connection
+    if (over) return; // the 413 is already on its way; reply() finishes it when the request closes
     let text;
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(parts)); } catch { return fail(new HttpError(400, { error: 'invalid utf-8' })); }
     try { done(JSON.parse(text)); } catch { fail(new HttpError(400, { error: 'invalid json' })); }
