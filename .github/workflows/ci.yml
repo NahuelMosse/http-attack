@@ -1,0 +1,59 @@
+name: ci
+on:
+  push:
+    branches: [main, hardening]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['22.13', '24']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit and integration tests
+        run: npm test
+      - name: Fixtures end to end, three identical runs
+        run: node tests/e2e-fixtures.mjs 3
+  windows-powershell:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Windows PowerShell 5.1, body from a file
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion
+          $db = Join-Path $env:RUNNER_TEMP 'app.db'
+          $bodyFile = Join-Path $env:RUNNER_TEMP 'body.json'
+          $reportFile = Join-Path $env:RUNNER_TEMP 'report.json'
+          $app = Start-Process node -ArgumentList 'skills/http-attack/fixtures/fixed-server.mjs','3917',$db -PassThru
+          Start-Sleep -Seconds 3
+          Set-Content -Path $bodyFile -Value '{"name":"Ana","email":"ana@example.com"}'
+          node skills/http-attack/scripts/http-attack.mjs http://127.0.0.1:3917 --header "Authorization: Bearer alice" --other-header "Authorization: Bearer bob" --write "POST /items @$bodyFile" --format json | Out-File $reportFile -Encoding utf8
+          $code = $LASTEXITCODE
+          Stop-Process -Id $app.Id -ErrorAction SilentlyContinue
+          $r = Get-Content $reportFile -Raw | ConvertFrom-Json
+          if (-not ($r.rows | Where-Object { $_.id -eq 'ok:legit-write:POST /items' })) { throw 'the legitimate write from the body file did not pass' }
+          if ($code -ne 0) { throw "unexpected findings, exit $code" }
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install --global @anthropic-ai/claude-code
+      - run: claude plugin validate .
