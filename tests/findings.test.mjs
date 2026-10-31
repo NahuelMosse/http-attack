@@ -4,10 +4,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ALICE, BOB, ITEM, SKILL, attack, runCli, tempDir, writeTemp } from './helpers/cli.mjs';
+import { ALICE, BOB, ITEM, ROOT, attack, runCli, tempDir, writeTemp } from './helpers/cli.mjs';
 import { startQuirkServer } from './helpers/quirk-server.mjs';
 import { startEarlyCloseServer } from './helpers/early-close-server.mjs';
-import { granted } from '../skills/http-attack/scripts/lib/http.mjs';
+import { granted } from '../lib/http.mjs';
 
 const withServer = async (quirks, fn) => {
   const s = await startQuirkServer(quirks);
@@ -136,7 +136,7 @@ test('Rails-style 422 on a foreign Origin is a CSRF refusal', async () => {
 test('faultCmd and faultRestore (config only): the fault is injected, the 5xx judged, the fault always restored', () => {
   const dir = tempDir();
   const flag = join(dir, 'fault.flag');
-  const toggle = join(SKILL, '..', '..', 'tests', 'helpers', 'toggle.mjs');
+  const toggle = join(ROOT, 'tests', 'helpers', 'toggle.mjs');
   return withServer({ faultFile: flag }, async (s) => {
     const r = await attack(s.url, [...ALICE, '--write', ITEM,
       ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"`, faultRestore: `node "${toggle}" off "${flag}"` })]);
@@ -151,7 +151,7 @@ test('faultCmd and faultRestore (config only): the fault is injected, the 5xx ju
 test('the fault command text never reaches the report', () => {
   const dir = tempDir();
   const flag = join(dir, 'fault.flag');
-  const toggle = join(SKILL, '..', '..', 'tests', 'helpers', 'toggle.mjs');
+  const toggle = join(ROOT, 'tests', 'helpers', 'toggle.mjs');
   return withServer({ faultFile: flag }, async (s) => {
     const r = await attack(s.url, [...ALICE, '--write', ITEM,
       ...config(dir, { faultCmd: `node "${toggle}" on "${flag}" --token=hunter2`, faultRestore: `node "${toggle}" off "${flag}"` })]);
@@ -163,7 +163,7 @@ test('the fault command text never reaches the report', () => {
 test('the fault probe is NOT RUN, and the command never runs, when no legitimate write succeeded', () => {
   const dir = tempDir();
   const flag = join(dir, 'fault.flag');
-  const toggle = join(SKILL, '..', '..', 'tests', 'helpers', 'toggle.mjs');
+  const toggle = join(ROOT, 'tests', 'helpers', 'toggle.mjs');
   return withServer({ faultFile: flag }, async (s) => {
     const r = await attack(s.url, [...ALICE, '--write', 'POST /items {"nope":1}', ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"` })]);
     assert.equal(r.byProbe('database-fault')[0].verdict, 'not-run');
@@ -230,7 +230,7 @@ test('connection-dropped: a connection closed without a response, while the app 
 test('fault-not-reported: a fault that a write answers with 2xx is a finding', () => {
   const dir = tempDir();
   const flag = join(dir, 'fault.flag');
-  const toggle = join(SKILL, '..', '..', 'tests', 'helpers', 'toggle.mjs');
+  const toggle = join(ROOT, 'tests', 'helpers', 'toggle.mjs');
   return withServer({ faultFile: flag, faultIgnored: true }, async (s) => {
     const r = await attack(s.url, [...ALICE, '--write', ITEM,
       ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"`, faultRestore: `node "${toggle}" off "${flag}"` })]);

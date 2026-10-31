@@ -21,7 +21,7 @@ test('ci.yml declares its jobs and validates the plugin with a pinned claude-cod
   const jobs = yml.split(/^jobs:\n/m)[1];
   assert.ok(jobs, 'jobs: present');
   const names = [...jobs.matchAll(/^ {2}([a-z-]+):$/gm)].map((m) => m[1]);
-  assert.deepEqual(names, ['test', 'validate']);
+  assert.deepEqual(names, ['test', 'package', 'validate']);
   assert.match(yml, /@anthropic-ai\/claude-code@\d+\.\d+\.\d+ plugin validate/);
 });
 

@@ -39,10 +39,14 @@ against the real server, and reports each failure with its severity and the resp
 
 ## Running it
 
+If the project lists `http-attack` in its `devDependencies`, run `npx --no-install http-attack` instead of
+`node "${CLAUDE_PLUGIN_ROOT}/bin/http-attack.mjs"` in every command below: it is the version CI runs. Without that
+dependency, use the copy bundled with this plugin, as written.
+
 Git Bash / macOS / Linux:
 
 ```bash
-MSYS_NO_PATHCONV=1 node "${CLAUDE_SKILL_DIR}/scripts/http-attack.mjs" http://127.0.0.1:3000 \
+MSYS_NO_PATHCONV=1 node "${CLAUDE_PLUGIN_ROOT}/bin/http-attack.mjs" http://127.0.0.1:3000 \
   --header "Authorization: Bearer $TOKEN_A" --other-header "Authorization: Bearer $TOKEN_B" \
   --write 'POST /items {"name":"Ana","email":"ana@example.com"}' \
   --read "/items?limit=10" --search "/items q" \
@@ -55,11 +59,11 @@ Windows PowerShell (5.1 strips the quotes inside inline JSON, so put bodies in f
 
 ```powershell
 Set-Content -Encoding ascii body.json '{"name":"Ana","email":"ana@example.com"}'
-node "${CLAUDE_SKILL_DIR}\scripts\http-attack.mjs" http://127.0.0.1:3000 `
+node "${CLAUDE_PLUGIN_ROOT}/bin/http-attack.mjs" http://127.0.0.1:3000 `
   --header "Authorization: Bearer $env:TOKEN_A" --write "POST /items @body.json" --read "/items?limit=10"
 ```
 
-An inline JSON body that does not parse exits 2 and shows what arrived. `node "${CLAUDE_SKILL_DIR}/scripts/http-attack.mjs" --help` lists every option.
+An inline JSON body that does not parse exits 2 and shows what arrived. `node "${CLAUDE_PLUGIN_ROOT}/bin/http-attack.mjs" --help` lists every option.
 Notes:
 
 - Zero dependencies; Node 22.13 or newer.

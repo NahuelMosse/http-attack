@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { ALICE, BOB, SKILL, runCli, tempDir } from './cli.mjs';
+import { ALICE, BOB, ROOT, runCli, tempDir } from './cli.mjs';
 
 // The one command both fixtures are attacked with: a fixed API must report nothing, the vulnerable one a known set.
 export const FIXTURE_ARGS = (db) => [
@@ -15,7 +15,7 @@ export const FIXTURE_ARGS = (db) => [
 ];
 
 export async function startFixture(kind, db) {
-  const child = spawn(process.execPath, [join(SKILL, 'fixtures', `${kind}-server.mjs`), '0', db], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [join(ROOT, 'tests', 'fixtures', `${kind}-server.mjs`), '0', db], { stdio: ['ignore', 'pipe', 'pipe'] });
   const port = await new Promise((resolve, reject) => {
     let out = '';
     child.stdout.on('data', (d) => { out += d; const m = out.match(/ on (\d+)/); if (m) resolve(Number(m[1])); });

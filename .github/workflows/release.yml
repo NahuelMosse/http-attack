@@ -1,0 +1,42 @@
+# The first version is published manually (npm publish from a maintainer's machine), because npm trusted publishing
+# can only be configured on a package that already exists. Every later version is published from here by pushing a tag.
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Trusted publishing needs npm 11.5.1 or newer
+        run: |
+          if ! node -e "const [a,b,c]=process.argv[1].split('.').map(Number);process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)" "$(npm --version)"; then
+            npm install --global npm@latest
+          fi
+          npm --version
+      - name: Tag, package.json and plugin.json versions agree
+        run: |
+          pkg=$(node -p "require('./package.json').version")
+          plugin=$(node -p "require('./.claude-plugin/plugin.json').version")
+          echo "package.json $pkg, plugin.json $plugin"
+          test "$pkg" = "$plugin" || { echo "::error::package.json ($pkg) and plugin.json ($plugin) differ"; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            test "$GITHUB_REF_NAME" = "v$pkg" || { echo "::error::tag $GITHUB_REF_NAME is not v$pkg"; exit 1; }
+          fi
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else echo "no lockfile, zero dependencies: nothing to install"; fi
+      - run: npm test
+      - name: Publish
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then npm publish; else npm publish --dry-run; fi

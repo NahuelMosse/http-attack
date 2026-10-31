@@ -1,6 +1,6 @@
 # http-attack
 
-Adversarial probes against an HTTP API running on your machine, as a Claude Code plugin and as a standalone CLI.
+Adversarial probes against an HTTP API running on your machine, as an npm package with a CLI, and as a Claude Code skill that runs the same CLI.
 Unit tests prove the handler does what you thought of; http-attack sends what you did not think of, against the real
 server: malformed bodies, hostile paths, raw parser errors, concurrent duplicate creates, bodies that never end, LIKE and
 SQL injection in search, database faults, missing authentication, IDOR and CSRF. Each failure is reported with a severity,
@@ -11,28 +11,16 @@ Zero runtime dependencies. Node 22.13 or newer. Loopback hosts only.
 > The probes create and delete rows, lock the database and send 50 MB bodies. Run them against a throwaway database, and
 > remember that a tunnel (`kubectl port-forward`, `ssh -L`, a cloud SQL proxy) answers on `127.0.0.1` too.
 
-## Install as a Claude Code plugin
+## Install
 
 ```bash
-claude plugin marketplace add NahuelMosse/http-attack
-claude plugin install http-attack@http-attack
+npm i -D http-attack
 ```
 
-Pin a release by adding the tag to the marketplace source:
+## Usage
 
 ```bash
-claude plugin marketplace add NahuelMosse/http-attack#v1.0.0
-```
-
-Update with `claude plugin marketplace update http-attack`, then `claude plugin update http-attack@http-attack`.
-
-Then ask Claude to break-test your local API ("my Express API is running on localhost:3000, try to break it before I ship").
-
-## Standalone CLI
-
-```bash
-git clone https://github.com/NahuelMosse/http-attack && cd http-attack
-node skills/http-attack/scripts/http-attack.mjs http://127.0.0.1:3000 \
+npx http-attack http://127.0.0.1:3000 \
   --header "Authorization: Bearer $TOKEN_A" --other-header "Authorization: Bearer $TOKEN_B" \
   --write 'POST /items {"name":"Ana","email":"ana@example.com"}' \
   --read "/items?limit=10" --search "/items q" \
@@ -85,11 +73,35 @@ example `server-error:path-param-letters:GET /items/{id}`; it never contains gen
 
 ## CI
 
+Depend on the package and run it in the pipeline, with the app started against a scratch database:
+
 ```yaml
-- run: node skills/http-attack/scripts/http-attack.mjs http://127.0.0.1:3000 --config http-attack.config.json --format json > attack.json
+- run: npm ci
+- run: node app.mjs & # start the app on a scratch database
+- run: npx http-attack http://127.0.0.1:3000 --config http-attack.config.json --format json > attack.json
 ```
 
-The step fails on exit 1 (findings) and exit 2 (could not run). Start the app with a scratch database before it.
+The step fails on exit 1 (findings) and exit 2 (could not run). The lockfile pins the version, so CI and the Claude Code
+skill (which prefers the project's own copy) run the same probes.
+
+## Claude Code skill
+
+The repository is also a Claude Code plugin whose skill drives the CLI: it reads the router, builds the command, triages the rows and fixes the findings.
+
+```bash
+claude plugin marketplace add NahuelMosse/http-attack
+claude plugin install http-attack@http-attack
+```
+
+Pin a release by adding the tag to the marketplace source:
+
+```bash
+claude plugin marketplace add NahuelMosse/http-attack#v1.0.0
+```
+
+Update with `claude plugin marketplace update http-attack`, then `claude plugin update http-attack@http-attack`.
+Then ask Claude to break-test your local API ("my Express API is running on localhost:3000, try to break it before I ship").
+When the project has `http-attack` in its `devDependencies`, the skill runs that copy; otherwise the one bundled in the plugin.
 
 ## Development
 
@@ -98,7 +110,7 @@ npm test                         # unit and integration tests
 node tests/e2e-fixtures.mjs 3     # attack both fixtures three times: identical results, the fixed one clean
 ```
 
-`skills/http-attack/fixtures/` holds a deliberately broken API and its fixed twin; the vulnerable one must keep reporting
+`tests/fixtures/` holds a deliberately broken API and its fixed twin; the vulnerable one must keep reporting
 the ids pinned in `tests/expected-vulnerable.json`.
 
 MIT licensed. See `NOTICES.md` for the ideas this builds on.
