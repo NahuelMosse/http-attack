@@ -101,7 +101,9 @@ claude plugin marketplace add NahuelMosse/http-attack#v1.0.0
 
 Update with `claude plugin marketplace update http-attack`, then `claude plugin update http-attack@http-attack`.
 Then ask Claude to break-test your local API ("my Express API is running on localhost:3000, try to break it before I ship").
-When the project has `http-attack` in its `devDependencies`, the skill runs that copy; otherwise the one bundled in the plugin.
+When the project has `http-attack` in its `devDependencies`, the skill runs that copy; otherwise the one bundled in the skill (`skills/http-attack/scripts/`).
+
+The skill directory is self-contained: `npx skills add NahuelMosse/http-attack` copies only `skills/http-attack/`, and it carries its own CLI, so a vendored copy runs without the npm package.
 
 ## Development
 

@@ -9,10 +9,10 @@ import { pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { ALICE, CLI, ITEM, ROOT, runCli, tempDir, writeTemp } from './helpers/cli.mjs';
 import { startQuirkServer } from './helpers/quirk-server.mjs';
-import { parseBase, toPath, unmangle } from '../lib/args.mjs';
-import { exitCode, summarize } from '../lib/report.mjs';
-import { checkPersistPath } from '../lib/probes/persist.mjs';
-import { createClient } from '../lib/http.mjs';
+import { parseBase, toPath, unmangle } from '../skills/http-attack/scripts/lib/args.mjs';
+import { exitCode, summarize } from '../skills/http-attack/scripts/lib/report.mjs';
+import { checkPersistPath } from '../skills/http-attack/scripts/lib/probes/persist.mjs';
+import { createClient } from '../skills/http-attack/scripts/lib/http.mjs';
 
 const URL_ = 'http://127.0.0.1:9';
 
@@ -121,7 +121,7 @@ test('the entry guard runs through a symlink or a junction', async () => {
   const dir = tempDir();
   const link = join(dir, 'linked-skill');
   symlinkSync(ROOT, link, 'junction');
-  const viaDir = await runCli(['--help'], { entry: join(link, 'bin', 'http-attack.mjs') });
+  const viaDir = await runCli(['--help'], { entry: join(link, 'skills', 'http-attack', 'scripts', 'http-attack.mjs') });
   assert.equal(viaDir.code, 0);
   assert.match(viaDir.stdout, /usage: node http-attack\.mjs/);
   let fileLink = null;
@@ -130,7 +130,7 @@ test('the entry guard runs through a symlink or a junction', async () => {
     const viaFile = await runCli(['--help'], { entry: fileLink });
     assert.match(viaFile.stdout, /usage: node http-attack\.mjs/);
   }
-  const noApp = await runCli(['http://127.0.0.1:9'], { entry: join(link, 'bin', 'http-attack.mjs') });
+  const noApp = await runCli(['http://127.0.0.1:9'], { entry: join(link, 'skills', 'http-attack', 'scripts', 'http-attack.mjs') });
   assert.equal(noApp.code, 2, 'a linked entry point still runs and still fails with 2, never silently with 0');
 });
 

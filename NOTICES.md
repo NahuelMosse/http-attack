@@ -1,6 +1,6 @@
 # Notices
 
-`bin/`, `lib/` and the fixtures are original code of this repository. No third-party text or code is copied.
+`skills/http-attack/scripts/` and the fixtures are original code of this repository. No third-party text or code is copied.
 Ideas credited:
 
 - **Last-byte synchronization** for concurrent requests: James Kettle, "Smashing the state machine: the true potential

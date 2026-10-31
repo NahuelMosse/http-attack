@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const SKILL = join(ROOT, 'skills', 'http-attack');
-export const CLI = join(ROOT, 'bin', 'http-attack.mjs');
+export const CLI = join(SKILL, 'scripts', 'http-attack.mjs');
 const FAST = ['--hang-ms', '600'];
 
 // Runs the CLI as a child process (the test process hosts the servers, so its event loop must stay free).

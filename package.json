@@ -15,11 +15,10 @@
   },
   "type": "module",
   "bin": {
-    "http-attack": "bin/http-attack.mjs"
+    "http-attack": "skills/http-attack/scripts/http-attack.mjs"
   },
   "files": [
-    "bin",
-    "lib",
+    "skills/http-attack",
     "README.md",
     "LICENSE",
     "CHANGELOG.md"
