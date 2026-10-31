@@ -1,6 +1,6 @@
 {
   "name": "http-attack",
-  "version": "1.0.0",
+  "version": "1.0.1-rc.0",
   "description": "Adversarial probes against an HTTP API running on this machine: malformed input, parser errors, races, injection, database faults, missing auth, IDOR and CSRF.",
   "keywords": ["http", "api", "security", "testing", "fuzzing", "idor", "csrf", "sql-injection", "hardening", "cli"],
   "license": "MIT",
