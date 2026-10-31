@@ -292,6 +292,12 @@ test('bodies load from a file and a failing legitimate create is NOT RUN for its
   assert.ok(refused.report.summary.notRun >= 2);
 }));
 
+test('a body file with a byte order mark and CRLF line ends makes a legitimate write', () => withServer({}, async (s) => {
+  const file = writeTemp(tempDir(), 'body.json', '﻿{\r\n  "name": "Ana",\r\n  "email": "ana@example.com"\r\n}\r\n');
+  const r = await attack(s.url, [...ALICE, '--write', `POST /items @${file}`]);
+  assert.equal(r.row('ok:legit-write:POST /items')?.verdict, 'pass');
+}));
+
 test('the config file suppresses with a reason and reports the counts; unused ignores are listed', () => withServer({ repoFile: true }, async (s) => {
   const dir = tempDir();
   const ignore = [{ id: 'file-served:file-served:GET /.git/config', reason: 'the fixture serves it on purpose' }, { id: 'idor:*', reason: 'never matches' }];
