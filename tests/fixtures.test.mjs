@@ -24,10 +24,12 @@ test('the fixed fixture answers an oversized body with 413 while the client is s
       const size = 4 << 20;
       const out = await new Promise((resolve) => {
         const req = request(`${fixture.url}/items`, { method: 'POST', agent: false, headers: { authorization: 'Bearer alice', 'content-type': 'application/json', 'content-length': size } });
-        let status = null, sent = false, error = null;
-        req.on('response', (res) => { status = res.statusCode; res.resume(); res.on('close', () => resolve({ status, sent, error })); });
-        req.on('finish', () => { sent = true; });
-        req.on('error', (e) => { error = e.code; resolve({ status, sent, error }); });
+        // The response may be read before the request body is flushed: wait for both, or for an error.
+        let status = null, sent = false, error = null, answered = false;
+        const settle = () => { if (error || (answered && sent)) resolve({ status, sent, error }); };
+        req.on('response', (res) => { status = res.statusCode; res.resume(); res.on('close', () => { answered = true; settle(); }); });
+        req.on('finish', () => { sent = true; settle(); });
+        req.on('error', (e) => { error = e.code; settle(); });
         req.end(Buffer.alloc(size, 97));
       });
       assert.deepEqual(out, { status: 413, sent: true, error: null }, `attempt ${i}`);
