@@ -74,7 +74,9 @@ These answers come from the HTTP parser, before any middleware.
 ## resources: `no-body-limit`, `read-before-reject`
 
 - Check `Content-Type` before reading the body (415 at the first bytes).
-- A byte limit in the body reader (413 at the limit, then close the connection) plus server timeouts: Node `server.requestTimeout`,
+- A byte limit in the body reader: answer 413 at the limit, then close with a lingering close: keep reading and discard the rest of
+  the body up to a cap (or send `Connection: close` once the response is flushed). An immediate destroy resets the socket and the
+  client loses the 413, notably on Windows and with large bodies. Plus server timeouts: Node `server.requestTimeout`,
   `server.headersTimeout`; Go `ReadHeaderTimeout`, `ReadTimeout`; uvicorn `--timeout-keep-alive` and a proxy `client_body_timeout`;
   Puma `first_data_timeout`.
 

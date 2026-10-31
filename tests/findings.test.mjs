@@ -147,6 +147,18 @@ test('faultCmd and faultRestore (config only): the fault is injected, the 5xx ju
   });
 });
 
+test('the fault command text never reaches the report', () => {
+  const dir = tempDir();
+  const flag = join(dir, 'fault.flag');
+  const toggle = join(SKILL, '..', '..', 'tests', 'helpers', 'toggle.mjs');
+  return withServer({ faultFile: flag }, async (s) => {
+    const r = await attack(s.url, [...ALICE, '--write', ITEM,
+      ...config(dir, { faultCmd: `node "${toggle}" on "${flag}" --token=hunter2`, faultRestore: `node "${toggle}" off "${flag}"` })]);
+    assert.equal(r.byProbe('database-fault')[0].verdict, 'pass');
+    assert.doesNotMatch(r.stdout, /hunter2|toggle\.mjs/);
+  });
+});
+
 test('the fault probe is NOT RUN, and the command never runs, when no legitimate write succeeded', () => {
   const dir = tempDir();
   const flag = join(dir, 'fault.flag');
@@ -202,7 +214,31 @@ test('ownership: user B is validated before A is probed', async () => {
   });
 });
 
-test('the body that never ends is sent up to the configured limit, not a fixed 2 MB', () => withServer({ streamLimit: 3 << 20 }, async (s) => {
+test('connection-dropped: a connection closed without a response, while the app stays up, is reported', async () => {
+  await withServer({ dropBadJson: true }, async (s) => {
+    const r = await attack(s.url, [...ALICE, '--write', ITEM]);
+    assert.ok(r.has('connection-dropped:malformed-json:POST /items'));
+    assert.ok(!r.has('process-died:malformed-json:POST /items'), 'the app answered afterwards');
+  });
+  await withServer({}, async (s) => {
+    const r = await attack(s.url, [...ALICE, '--write', ITEM]);
+    assert.ok(!r.findings.some((id) => id.startsWith('connection-dropped:')));
+  });
+});
+
+test('fault-not-reported: a fault that a write answers with 2xx is a finding', () => {
+  const dir = tempDir();
+  const flag = join(dir, 'fault.flag');
+  const toggle = join(SKILL, '..', '..', 'tests', 'helpers', 'toggle.mjs');
+  return withServer({ faultFile: flag, faultIgnored: true }, async (s) => {
+    const r = await attack(s.url, [...ALICE, '--write', ITEM,
+      ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"`, faultRestore: `node "${toggle}" off "${flag}"` })]);
+    assert.ok(r.has('fault-not-reported:database-fault:POST /items'));
+    assert.ok(!existsSync(flag), 'the restore command ran');
+  });
+});
+
+test('the body that never ends is sent up to the configured limit; without one 2 MB is assumed',() => withServer({ streamLimit: 3 << 20 }, async (s) => {
   const dir = tempDir();
   const guess = await attack(s.url, [...ALICE, '--write', ITEM]);
   assert.ok(guess.has('no-body-limit:body-never-ends:POST /items'), 'with no limit given 2 MB is assumed and a 3 MB limit looks absent');

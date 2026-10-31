@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 const [port, file] = process.argv.slice(2);
 const db = new DatabaseSync(file);
-db.exec('PRAGMA synchronous = OFF'); // a fixture needs no durability, and an fsync per write makes a slow disk look like a hung API
+db.exec('PRAGMA synchronous = OFF'); // durability is irrelevant for a fixture; skipping the fsync keeps writes fast on a slow disk
 db.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, owner TEXT, name TEXT, email TEXT UNIQUE); CREATE TABLE IF NOT EXISTS audit (at TEXT); '
   + 'CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, title TEXT)');
 

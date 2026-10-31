@@ -93,9 +93,8 @@ export async function main(argv, io = {}) {
     if (opts.persistSave || opts.persistVerify) {
       checkPersistPath(opts.persistSave ?? opts.persistVerify, config, cwd);
       run.itemPath = opts.itemPath;
+      if (!(await client.alive())) throw new UsageError(`The app does not answer at ${parsed.base.origin}.`);
       const result = opts.persistSave ? await persistSave(run, opts.persistSave) : await persistVerify(run, opts.persistVerify);
-      const first = await client.alive();
-      if (!first) throw new UsageError(`The app does not answer at ${parsed.base.origin}.`);
       out(opts.format === 'json' ? `${JSON.stringify({ schemaVersion: 1, ok: result.ok, ...result.data }, null, 2)}\n` : `${result.message}\n`);
       return result.ok ? EXIT.OK : EXIT.FINDINGS;
     }

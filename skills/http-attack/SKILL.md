@@ -110,7 +110,7 @@ a check, so they are accepted only inside one route and only with a `reason`:
 | `invalidUtf8` | `reject` (default) or `replace` (the parser substitutes U+FFFD by design) |
 | `idempotentCreate` + `reason` | several 2xx for one key are expected (`ON CONFLICT DO NOTHING`); the reason is mandatory |
 | `vary`, `contentType` | as the flags |
-| `ignore` | `{id, reason}`: `id` is a finding id (shown in every report row), a rule name (`stack-leak`), or `<rule>:<prefix>*`. It must start with a known rule and a reason is mandatory |
+| `ignore` | `{id, reason}`: `id` is a finding id (shown in every report row), a rule name (`stack-leak`), `<rule>:<probe>` (every target of that probe), or `<rule>:<prefix>*`. It must start with a known rule and a reason is mandatory. `not-run` is never accepted alone: name the probe (`not-run:<probe>`) so one gap cannot hide the others |
 
 The config can also hold `faultCmd`, `faultRestore`, `persistDir`, and list `writes`, `reads`, `searches`, `uniques` (bodies as objects or `"@file"`) and `persistIgnore`
 (fields skipped when comparing the persisted item).
@@ -154,6 +154,9 @@ Every rule the script can emit; the finding id is `<rule>:<probe>:<target>`.
 | `missing-allow` | low | 405 without an `Allow` header |
 | `head-unsupported` | low | HEAD on a readable route answers 405 (RFC 9110 9.1) |
 | `not-run` | - | a probe could not reach a verdict; never a pass |
+
+A 5xx whose body leaks internals is reported twice on purpose: `server-error` (the app failed on client input) and `stack-leak`
+(what the body disclosed) have different fixes and different owners, so each keeps its own id and can be suppressed on its own.
 
 ## What the script probes
 

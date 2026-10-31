@@ -40,6 +40,14 @@ test('SKILL.md follows the plugin conventions', () => {
   assert.match(skill, /every remaining one is suppressed in the config with its/);
 });
 
+test('the docs explain the paired server-error and stack-leak ids and the lingering close', () => {
+  assert.match(skill, /`server-error`.*and `stack-leak`[\s\S]*?on purpose|reported twice on purpose/);
+  assert.match(skill, /`not-run:<probe>`/);
+  const fixes = readFileSync(join(SKILL, 'references', 'fixes.md'), 'utf8');
+  assert.match(fixes, /lingering close/);
+  assert.doesNotMatch(fixes, /413 at the limit, then close the connection/);
+});
+
 test('every option in --help is accepted by the parser and no flag is documented that does not exist', async () => {
   const { HELP, FLAGS_WITH_VALUE } = await import('../skills/http-attack/scripts/lib/args.mjs');
   const flags = new Set([...HELP.matchAll(/^\s+(--[a-z-]+)/gm)].map((m) => m[1]));

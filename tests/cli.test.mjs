@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { symlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -165,15 +165,49 @@ test('persistence: save, verify, a missing file and volatile fields', async () =
     assert.match(missing.stderr, /cannot read/);
     const state = JSON.parse((await import('node:fs')).readFileSync(file, 'utf8'));
     writeFileSync(file, JSON.stringify({ ...state, body: state.body.replace('Ana', 'Gone') }));
-    const lost = await runCli([s.url, ...ALICE, '--persist-verify', file]);
+    const lost = await runCli([s.url, ...ALICE, '--persist-verify', file, '--format', 'json']);
     assert.equal(lost.code, 1);
-    assert.match(lost.stdout, /FAIL critical/);
+    assert.equal(lost.json().id, 'not-durable:persist-verify:GET /items/{id}');
+    assert.equal(lost.json().severity, 'critical');
+    assert.equal(lost.json().ok, false);
+    assert.match((await runCli([s.url, ...ALICE, '--persist-verify', file])).stdout, /FAIL critical/);
     writeFileSync(file, JSON.stringify({ ...state, body: JSON.stringify({ ...JSON.parse(state.body), stamp: 1 }) }));
     const ignoring = await runCli([s.url, ...ALICE, '--persist-verify', file, '--config', writeTemp(dir, 'c.json', '{"persistIgnore":["stamp"]}')]);
     assert.equal(ignoring.code, 0, 'a field named in persistIgnore is not compared');
   } finally { await s.close(); }
 });
 
+
+test('--persist-save never overwrites a file that is not a state file, and replaces its own', async () => {
+  const s = await startQuirkServer();
+  const dir = tempDir();
+  try {
+    const manifest = writeTemp(dir, 'package.json', '{"name":"app"}');
+    const refused = await runCli([s.url, ...ALICE, '--write', ITEM, '--persist-save', manifest]);
+    assert.equal(refused.code, 2);
+    assert.match(refused.stderr, /not overwritten/);
+    assert.equal(readFileSync(manifest, 'utf8'), '{"name":"app"}');
+    assert.ok(!s.requests.some((q) => q.method === 'POST'), 'nothing was created before the refusal');
+    const state = join(dir, 'state.json');
+    assert.equal((await runCli([s.url, ...ALICE, '--write', ITEM, '--persist-save', state])).code, 0);
+    const again = await runCli([s.url, ...ALICE, '--write', 'POST /items {"name":"Bea","email":"bea@example.com"}', '--persist-save', state]);
+    assert.equal(again.code, 0, again.stderr);
+    assert.match(readFileSync(state, 'utf8'), /Bea/);
+  } finally { await s.close(); }
+});
+
+test('persist mode with the app down is a usage error, not a crash', async () => {
+  const s = await startQuirkServer();
+  const url = s.url;
+  await s.close();
+  const dir = tempDir();
+  for (const args of [['--write', ITEM, '--persist-save', join(dir, 'state.json')], ['--persist-verify', writeTemp(dir, 'v.json', '{"item":"/items/1","status":200,"body":"{}"}')]]) {
+    const r = await runCli([url, ...ALICE, ...args]);
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /does not answer/);
+    assert.doesNotMatch(r.stderr, /crashed/);
+  }
+});
 
 test('the state file of --persist-save must stay in the working directory or the temp directory unless the config allows its directory', async () => {
   const outside = join(homedir(), 'http-attack-forbidden', 'state.json');

@@ -21,7 +21,7 @@ const runShell = (command) => spawnSync(command, { shell: true, encoding: 'utf8'
 // and the process stays up. Two injectors: an exclusive lock on a SQLite file, or any shell command with its restore.
 export async function faultProbe(run, w) {
   const { client, opts } = run;
-  const how = opts.faultSqlite ? 'the SQLite file locked (BEGIN EXCLUSIVE)' : `"${opts.faultCmd}" run`;
+  const how = opts.faultSqlite ? 'the SQLite file locked (BEGIN EXCLUSIVE)' : 'the configured fault command run'; // the command text can hold secrets: it stays out of reports
   const target = w ? `${w.method} ${w.path}` : 'write';
   const spec = { group: 'faults', probe: 'database-fault', target, name: `${target} with ${how}` };
   const expected = '503 or 500 with the generic error body and the common headers; the process keeps answering';

@@ -10,6 +10,7 @@ db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL');
 db.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, owner TEXT, name TEXT, email TEXT UNIQUE); CREATE TABLE IF NOT EXISTS audit (at TEXT); CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, owner TEXT, title TEXT UNIQUE)');
 
 const BODY_LIMIT = 64 * 1024;
+const DRAIN_CAP = 8 * 1024 * 1024;
 const MAX_PAGE = 100;
 const common = () => ({ 'x-request-id': randomUUID(), 'cache-control': 'no-store' });
 const reply = (res, status, body, extra = {}) => {
@@ -27,13 +28,13 @@ const readJson = (req) => new Promise((done, fail) => {
   if (type !== 'application/json') return fail(new HttpError(415, { error: 'unsupported media type' }));
   const parts = []; let size = 0, over = false;
   req.on('data', (d) => {
-    if (over) return;
     size += d.length;
-    if (size > BODY_LIMIT) { over = true; fail(new HttpError(413, { error: 'too large' }, { connection: 'close' })); return; }
+    if (over) { if (size > BODY_LIMIT + DRAIN_CAP) req.destroy(); return; } // lingering close: the rest is read and discarded up to a cap
+    if (size > BODY_LIMIT) { over = true; fail(new HttpError(413, { error: 'too large' })); return; }
     parts.push(d);
   });
   req.on('end', () => {
-    if (over) return;
+    if (over) { req.socket.end(); return; } // everything was read: closing now does not reset the connection
     let text;
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(parts)); } catch { return fail(new HttpError(400, { error: 'invalid utf-8' })); }
     try { done(JSON.parse(text)); } catch { fail(new HttpError(400, { error: 'invalid json' })); }
@@ -96,8 +97,6 @@ const server = createServer((req, res) => {
   handle(req, res).catch((e) => {
     if (e instanceof HttpError) {
       reply(res, e.status, e.body, e.extra);
-      // Lingering close: the rest of the body is read and discarded for a moment, because closing a socket with unread data resets it and the client loses the 413.
-      if (e.status === 413) res.on('finish', () => { req.resume(); setTimeout(() => req.destroy(), 2000).unref(); });
       return;
     }
     console.error(e);

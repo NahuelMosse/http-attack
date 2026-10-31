@@ -31,9 +31,19 @@ export const sameBody = (a, b, ignore = []) => {
 };
 
 // Persistence is a two-step run around a restart. Returns { ok, message, data } for the CLI to print.
+// A file that is not a previous persist state is never overwritten (it could be a package.json).
+const refuseToOverwrite = (file) => {
+  let existing;
+  try { existing = readFileSync(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') return; throw new UsageError(`--persist-save: cannot read ${file}: ${e.code ?? e.message}`); }
+  let state;
+  try { state = JSON.parse(existing); } catch { /* not JSON */ }
+  if (typeof state?.item !== 'string' || !('status' in state) || !('body' in state)) throw new UsageError(`--persist-save: ${file} exists and is not a state file written by --persist-save: it is not overwritten.`);
+};
+
 export async function persistSave(run, file) {
   const w = run.opts.writes[0];
   if (!w) throw new UsageError('--persist-save needs a --write.');
+  refuseToOverwrite(file);
   const p = wire(w, run.settings(w.method, w.path));
   const res = await run.client.send(w.method, w.path, { body: p.text, type: p.type, common: false });
   if (res.s === null) throw new Error(`the create did not answer: ${res.err}`);
