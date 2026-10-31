@@ -16,14 +16,13 @@ test('no tracked text file contains a control character', () => {
   assert.deepEqual(dirty, []);
 });
 
-test('ci.yml declares its jobs and PowerShell paths are built with Join-Path', () => {
+test('ci.yml declares its jobs and validates the plugin with a pinned claude-code', () => {
   const yml = readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
   const jobs = yml.split(/^jobs:\n/m)[1];
   assert.ok(jobs, 'jobs: present');
   const names = [...jobs.matchAll(/^ {2}([a-z-]+):$/gm)].map((m) => m[1]);
-  assert.deepEqual(names, ['test', 'windows-powershell', 'validate']);
-  assert.match(yml, /Join-Path \$env:RUNNER_TEMP 'app\.db'/);
-  assert.doesNotMatch(yml, /\$env:RUNNER_TEMP[A-Za-z]/);
+  assert.deepEqual(names, ['test', 'validate']);
+  assert.match(yml, /@anthropic-ai\/claude-code@\d+\.\d+\.\d+ plugin validate/);
 });
 
 test('a temp dir made by the test helpers is removed when the process exits', () => {

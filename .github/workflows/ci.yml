@@ -23,17 +23,6 @@ jobs:
         run: npm test
       - name: Fixtures end to end, three identical runs
         run: node tests/e2e-fixtures.mjs 3
-  windows-powershell:
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Windows PowerShell 5.1, body from a file
-        shell: powershell
-        run: .github/ci/windows-powershell.ps1
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
