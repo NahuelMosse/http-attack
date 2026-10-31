@@ -78,6 +78,7 @@ Depend on the package and run it in the pipeline, with the app started against a
 ```yaml
 - run: npm ci
 - run: node app.mjs & # start the app on a scratch database
+- run: curl --silent --output /dev/null --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:3000/ # the attack exits 2 if the app is not listening yet
 - run: npx http-attack http://127.0.0.1:3000 --config http-attack.config.json --format json > attack.json
 ```
 
