@@ -39,6 +39,10 @@ against the real server, and reports each failure with its severity and the resp
 
 ## Running it
 
+If the project lists `http-attack` in its `devDependencies`, run `npx --no-install http-attack` instead of
+`node "${CLAUDE_SKILL_DIR}/scripts/http-attack.mjs"` in every command below: it is the version CI runs. Without that
+dependency, use the copy bundled with this skill, as written.
+
 Git Bash / macOS / Linux:
 
 ```bash
@@ -55,7 +59,7 @@ Windows PowerShell (5.1 strips the quotes inside inline JSON, so put bodies in f
 
 ```powershell
 Set-Content -Encoding ascii body.json '{"name":"Ana","email":"ana@example.com"}'
-node "${CLAUDE_SKILL_DIR}\scripts\http-attack.mjs" http://127.0.0.1:3000 `
+node "${CLAUDE_SKILL_DIR}/scripts/http-attack.mjs" http://127.0.0.1:3000 `
   --header "Authorization: Bearer $env:TOKEN_A" --write "POST /items @body.json" --read "/items?limit=10"
 ```
 

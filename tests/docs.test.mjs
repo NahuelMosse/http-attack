@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { SKILL } from './helpers/cli.mjs';
+import { ROOT, SKILL } from './helpers/cli.mjs';
 import { RULES } from '../skills/http-attack/scripts/lib/registry.mjs';
 
 const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');

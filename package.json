@@ -1,18 +1,36 @@
 {
   "name": "http-attack",
   "version": "1.0.0",
-  "private": true,
+  "description": "Adversarial probes against an HTTP API running on this machine: malformed input, parser errors, races, injection, database faults, missing auth, IDOR and CSRF.",
+  "keywords": ["http", "api", "security", "testing", "fuzzing", "idor", "csrf", "sql-injection", "hardening", "cli"],
+  "license": "MIT",
+  "author": "Nahuel Mosse",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NahuelMosse/http-attack.git"
+  },
+  "homepage": "https://github.com/NahuelMosse/http-attack#readme",
+  "bugs": {
+    "url": "https://github.com/NahuelMosse/http-attack/issues"
+  },
   "type": "module",
-  "description": "Adversarial probes against an HTTP API running on this machine, as a Claude Code skill and a standalone CLI.",
   "bin": {
     "http-attack": "skills/http-attack/scripts/http-attack.mjs"
   },
+  "files": [
+    "skills/http-attack",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "engines": {
     "node": ">=22.13"
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "test": "node --test --test-concurrency=4 \"tests/*.test.mjs\""
-  },
-  "license": "MIT",
-  "author": "Nahuel Mosse"
+  }
 }

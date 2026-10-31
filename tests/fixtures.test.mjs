@@ -38,7 +38,7 @@ test('the fixed fixture answers an oversized body with 413 while the client is s
 });
 
 test('every pinned id of the vulnerable fixture is explained by a defect in its header, and every defect has an id', () => {
-  const header = readFileSync(new URL('../skills/http-attack/fixtures/vulnerable-server.mjs', import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//'));
+  const header = readFileSync(new URL('fixtures/vulnerable-server.mjs', import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//'));
   const defects = new Map();
   let current = null;
   for (const line of header) {
