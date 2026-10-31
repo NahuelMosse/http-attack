@@ -2,7 +2,7 @@
 // the ones in tests/expected-package-files.json. Without an argument it asks `npm pack --dry-run`.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -10,7 +10,7 @@ const expected = JSON.parse(readFileSync(join(root, 'tests', 'expected-package-f
 
 export function packedFiles(tarball) {
   if (tarball) {
-    const out = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8' });
+    const out = execFileSync('tar', ['-tzf', basename(tarball)], { cwd: dirname(resolve(tarball)), encoding: 'utf8' }) // relative name: GNU tar reads `D:` as a host;
     return out.split(/\r?\n/).filter((l) => l && !l.endsWith('/')).map((l) => l.replace(/^package\//, '')).sort();
   }
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
