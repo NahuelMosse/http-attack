@@ -59,9 +59,11 @@ export async function malformedInput(run, w) {
 
   // Only a 413 shows the limit works. A 400/422 is the validation of the field the probe padded: the limit was not tested.
   // A server that answers early and closes can reset a large upload: the request is repeated once before a drop is judged.
-  const limitVerdict = async (s, body, expected, rule) => {
-    let res = await send(w.method, body);
-    if (res.s === null || res.truncated) res = await send(w.method, body);
+  // `makeBody` builds a new wire body (new unique values) for each attempt: a dropped attempt may already have been stored,
+  // and repeating it would answer 409 and hide the missing limit.
+  const limitVerdict = async (s, makeBody, expected, rule) => {
+    let res = await send(w.method, makeBody());
+    if (res.s === null || res.truncated) res = await send(w.method, makeBody());
     if (await run.transportFault(res, s, expected)) return;
     if (res.s === 413) run.pass(s, res.s, expected);
     else if (granted(res)) run.fail(rule, s, res.s, expected, rule === 'limit-counts-characters' ? `${res.s} for a body over the limit` : undefined);
@@ -71,9 +73,9 @@ export async function malformedInput(run, w) {
   const big = spec('body-1mb', '1 MB body');
   if (st.bodyLimit && st.bodyLimit >= MIB) run.skipped(big, `bodyLimit ${st.bodyLimit} is at least 1 MB`);
   else {
-    const body = withField(wire(w, st), (v) => v + 'a'.repeat(MIB));
-    if (body === null) run.notRun(big, 'the body has no string field to pad to 1 MB');
-    else await limitVerdict(big, body, '413, never stored and never a 5xx', 'no-body-limit');
+    const makeBody = () => withField(wire(w, st), (v) => v + 'a'.repeat(MIB));
+    if (makeBody() === null) run.notRun(big, 'the body has no string field to pad to 1 MB');
+    else await limitVerdict(big, makeBody, '413, never stored and never a 5xx', 'no-body-limit');
   }
 
   const bytesProbe = spec('limit-counts-bytes', 'body 1+ byte over the limit made of multibyte characters');
@@ -82,11 +84,13 @@ export async function malformedInput(run, w) {
   else if (!st.bodyLimit) run.skipped(bytesProbe, 'no body limit configured (--body-limit or bodyLimit)');
   else if (bigRow?.rule === 'no-body-limit') run.skipped(bytesProbe, 'the 1 MB body was accepted: there is no limit to count bytes against');
   else {
-    const q = wire(w, st);
-    const rest = Buffer.byteLength(withField(q, () => '') ?? '');
-    const body = withField(q, () => 'é'.repeat(Math.floor((st.bodyLimit - rest) / 2) + 1));
-    if (body === null) run.notRun(bytesProbe, 'the body has no string field to pad with multibyte characters');
-    else await limitVerdict(bytesProbe, body, '413: the limit counts bytes, not characters', 'limit-counts-characters');
+    const makeBody = () => {
+      const q = wire(w, st);
+      const rest = Buffer.byteLength(withField(q, () => '') ?? '');
+      return withField(q, () => 'é'.repeat(Math.floor((st.bodyLimit - rest) / 2) + 1));
+    };
+    if (makeBody() === null) run.notRun(bytesProbe, 'the body has no string field to pad with multibyte characters');
+    else await limitVerdict(bytesProbe, makeBody, '413: the limit counts bytes, not characters', 'limit-counts-characters');
   }
 
   for (const m of ['PUT', 'DELETE', 'PATCH'].filter((x) => x !== w.method)) {

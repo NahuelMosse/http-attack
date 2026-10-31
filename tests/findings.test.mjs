@@ -6,6 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ALICE, BOB, ITEM, SKILL, attack, runCli, tempDir, writeTemp } from './helpers/cli.mjs';
 import { startQuirkServer } from './helpers/quirk-server.mjs';
+import { startEarlyCloseServer } from './helpers/early-close-server.mjs';
 import { granted } from '../skills/http-attack/scripts/lib/http.mjs';
 
 const withServer = async (quirks, fn) => {
@@ -257,7 +258,24 @@ test('1 MB probe pads the legitimate body, so a server with no limit is caught',
   });
 });
 
-test('--format json does not change what is sent: a form body stays a form', () => withServer({}, async (s) => {
+test('a 1 MB body whose first attempt was stored but never answered is repeated with new values, so the missing limit is still found', () => withServer({ noLimit: true, dropBigAfterStoring: true }, async (s) => {
+  const r = await attack(s.url, [...ALICE, '--write', ITEM]);
+  assert.ok(r.has('no-body-limit:body-1mb:POST /items'));
+  assert.ok(!r.row('not-run:body-1mb:POST /items'));
+}));
+
+test('a 413 with Connection: close followed by a destroyed socket mid-upload passes the body limit, it is not a dropped connection', async () => {
+  const s = await startEarlyCloseServer();
+  try {
+    for (let i = 0; i < 3; i++) {
+      const r = await attack(s.url, [...ALICE, '--write', ITEM]);
+      assert.equal(r.row('ok:body-1mb:POST /items')?.verdict, 'pass', `attempt ${i}`);
+      assert.ok(!r.has('connection-dropped:body-1mb:POST /items'), `attempt ${i}`);
+    }
+  } finally { await s.close(); }
+});
+
+test('--format json does not change what is sent: a form body stays a form',() => withServer({}, async (s) => {
   await attack(s.url, [...ALICE, '--write', 'POST /items a=1&b=x@y.z']);
   const post = s.requests.find((q) => q.method === 'POST' && q.url === '/items');
   assert.equal(post.headers['content-type'], 'application/x-www-form-urlencoded');

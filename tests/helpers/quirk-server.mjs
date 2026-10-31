@@ -10,6 +10,7 @@ export async function startQuirkServer(q = {}) {
   const items = [];
   const things = [];
   let seq = 0;
+  let bigDropped = false; // dropBigAfterStoring: only the first large body loses its answer
   const resetDone = new Set(); // origins whose first request was reset (resetFirstOrigin)
   const requests = [];
   const json = (res, s, body, extra = {}) => {
@@ -89,6 +90,7 @@ export async function startQuirkServer(q = {}) {
           if (items.some((i) => i.email === f.email)) return json(res, 409, { error: 'exists' });
           const it = { id: q.uuid ? randomUUID() : ++seq, owner: who, name: f.name, email: f.email };
           items.push(it);
+          if (q.dropBigAfterStoring && buf.length > 1 << 19 && !bigDropped) { bigDropped = true; return req.socket.destroy(); } // stored, never answered
           return json(res, 201, it, q.noLocation ? {} : { location: `/items/${it.id}` });
         }
         return json(res, 405, { error: 'method' }, { allow: 'GET, POST' });
