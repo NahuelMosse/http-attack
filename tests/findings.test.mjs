@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ALICE, BOB, ITEM, ROOT, attack, runCli, tempDir, writeTemp } from './helpers/cli.mjs';
 import { startQuirkServer } from './helpers/quirk-server.mjs';
 import { startEarlyCloseServer } from './helpers/early-close-server.mjs';
-import { granted } from '../lib/http.mjs';
+import { granted } from '../skills/http-attack/scripts/lib/http.mjs';
 
 const withServer = async (quirks, fn) => {
   const s = await startQuirkServer(quirks);
