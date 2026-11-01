@@ -70,7 +70,7 @@ export async function pathProbes(run, { writes, itemTemplate }) {
     // Both findings can apply to one answer: HEAD refused, and without an Allow header.
     if (res.s === 405 && m === 'HEAD' && readable.includes(r)) run.fail('head-unsupported', s, 405, 'HEAD answered like GET without the body (RFC 9110 9.1)');
     if (res.s === 405 && !res.headers.allow) run.fail('missing-allow', s, 405, '405 must name the allowed methods in Allow (RFC 9110 15.5.6)');
-    if (res.s !== 405 || (m === 'OPTIONS' && res.headers.allow)) run.pass(s, res.s, expected);
+    if (res.s !== 405 || (res.headers.allow && (m === 'OPTIONS' || !readable.includes(r)))) run.pass(s, res.s, expected);
   }
 
   for (const [p, marker] of LEAKS) {

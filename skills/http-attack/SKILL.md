@@ -76,7 +76,11 @@ Notes:
   `Origin: null`) with the given credentials, cookie or not; each must be refused. A 409, 422 or 400 there is `NOT RUN`: the
   body was judged, not the origin. `--no-ambient` declares that no credential a browser sends on its own reaches the API: the
   origin rows are replaced by one check (no legitimate response sets `Set-Cookie` or asks `WWW-Authenticate`).
-- Every write and read is also sent with a foreign `Host`. Accepted, it is an `info` row; with `--strict-host` it is a finding.
+- `--host-check` also sends every write and read with a foreign `Host` (after a read answered 2xx legitimately). Accepted, it is
+  an `info` row; with `--strict-host` it is a finding. A 409 or 422 there is `NOT RUN`.
+- `--leak-path /backup.sql` (repeatable) adds a file the app must not serve: a 2xx with a non-HTML body is `file-served`.
+- A body that never ends is sent chunked and with a large `Content-Length`; with a declared body limit only a 413 passes.
+  HEAD goes to write-only routes too (a 405 with `Allow` is fine, a 5xx is not). In the race a 3xx counts as a success.
 - `--json` sends form bodies as JSON objects. Without it, a form write whose legitimate request answers 415 is sent as JSON
   from then on, and the `legit-write` row says so.
 - `--openapi openapi.yaml` checks every status the app answered against the statuses the contract declares for that
