@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ROOT } from './helpers/cli.mjs';
 
 const tracked = () => execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(Boolean);
-const TEXT = /\.(mjs|js|json|md|yml|yaml|txt|ps1|sh)$|^(LICENSE|NOTICES\.md)$/;
+const TEXT = /\.(mjs|js|json|md|yml|yaml|txt|ps1|sh)$|(^|\/)(LICENSE|NOTICES\.md)$/;
 // C0 controls except tab, line feed and carriage return in CRLF pairs.
 const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f]|\r(?!\n)/;
 
@@ -31,4 +31,9 @@ test('a temp dir made by the test helpers is removed when the process exits', ()
   const dir = r.stdout.trim();
   assert.ok(dir.includes('http-attack-test-'), r.stderr);
   assert.equal(existsSync(dir), false);
+});
+
+// A copy of the skill directory alone (npx skills add) must still carry the license.
+test('the skill directory carries the same LICENSE as the repository', () => {
+  assert.equal(readFileSync(join(ROOT, 'skills', 'http-attack', 'LICENSE'), 'utf8'), readFileSync(join(ROOT, 'LICENSE'), 'utf8'));
 });

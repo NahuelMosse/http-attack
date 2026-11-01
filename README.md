@@ -116,4 +116,4 @@ node tests/e2e-fixtures.mjs 3     # attack both fixtures three times: identical 
 `tests/fixtures/` holds a deliberately broken API and its fixed twin; the vulnerable one must keep reporting
 the ids pinned in `tests/expected-vulnerable.json`.
 
-MIT licensed. See `NOTICES.md` for the ideas this builds on.
+MIT licensed. See `skills/http-attack/NOTICES.md` for the ideas this builds on.
