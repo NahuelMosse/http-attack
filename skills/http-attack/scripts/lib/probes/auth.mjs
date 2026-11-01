@@ -1,5 +1,5 @@
 import { granted, is2xx } from '../http.mjs';
-import { wire } from '../body.mjs';
+import { switchToJsonOn415, wire } from '../body.mjs';
 
 const snippet = (text) => text.replace(/\s+/g, ' ').slice(0, 120);
 
@@ -37,7 +37,13 @@ export async function legitWrite(run, w) {
   const st = run.settings(w.method, w.path);
   const p = wire(w, st);
   if (p.error) { run.notRun(spec, p.error); return { ok: false }; }
-  const res = await run.client.send(w.method, w.path, { body: p.text, type: p.type });
+  let res = await run.client.send(w.method, w.path, { body: p.text, type: p.type });
+  let switched = false;
+  if (switchToJsonOn415(w, res.s, st)) {
+    switched = true;
+    const json = wire(w, st);
+    res = await run.client.send(w.method, w.path, { body: json.text, type: json.type });
+  }
   if (await run.transportFault(res, spec, '2xx')) return { ok: false };
   if (!granted(res)) {
     run.notRun(spec, res.s >= 300
@@ -45,15 +51,19 @@ export async function legitWrite(run, w) {
       : `the legitimate request answered ${res.s} (${snippet(res.text)}): every other row of this write is unreliable until it succeeds`);
     return { ok: false, res };
   }
-  run.pass(spec, res.s, '2xx');
+  run.pass(spec, res.s, '2xx', switched ? 'the form answered 415: the write is sent as application/json from here on' : undefined);
   return { ok: true, res, item: itemUrlOf(res, { base: run.client.base, itemPath: run.itemPath }) };
 }
 
 // A group of probes that all depend on a legitimate write that failed.
 export function notRunDependents(run, w, why) {
   const target = `${w.method} ${w.path}`;
-  for (const [group, probe] of [['input', 'input-probes'], ['resources', 'resource-probes'], ['auth', 'access-probes'], ['csrf', 'csrf-probes']]) {
-    if (group === 'csrf' && !run.opts.csrf) continue;
+  const { csrf, originCheck, noAmbient } = run.opts;
+  const groups = [['input', 'input-probes'], ['resources', 'resource-probes'], ['auth', 'access-probes'], ['csrf', 'csrf-probes'], ['host', 'host-probes'], ['origin', 'origin-probes']];
+  for (const [group, probe] of groups) {
+    if (group === 'csrf' && !csrf) continue;
+    if (group === 'origin' && (originCheck !== 'always' || noAmbient)) continue;
+    if (group === 'host' && !run.opts.hostCheck && !run.opts.strictHost) continue;
     run.notRun({ group, probe, target, name: `${target} ${probe}` }, `the legitimate request failed: ${why}`);
   }
 }

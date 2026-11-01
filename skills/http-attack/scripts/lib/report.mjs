@@ -13,6 +13,7 @@ export function summarize(rows) {
     passed, failed, suppressed,
     notRun: count((r) => r.verdict === 'not-run'),
     skipped: count((r) => r.verdict === 'skipped'),
+    info: count((r) => r.verdict === 'info'),
     bySeverity,
   };
 }
@@ -40,13 +41,13 @@ export function renderJson({ base, rows, summary, unusedIgnores, unusedRoutes = 
   }, null, 2);
 }
 
-const MARK = { fail: (r) => `FAIL ${r.severity.padEnd(8)}`, 'not-run': () => 'NOT RUN      ', pass: () => 'pass         ', skipped: () => 'skipped      ', suppressed: () => 'suppressed   ' };
+const MARK = { fail: (r) => `FAIL ${r.severity.padEnd(8)}`, 'not-run': () => 'NOT RUN      ', pass: () => 'pass         ', skipped: () => 'skipped      ', info: () => 'info         ', suppressed: () => 'suppressed   ' };
 
 export function renderText({ rows, summary, unusedIgnores, unusedRoutes = [] }) {
   const out = [];
   const pad = ' '.repeat(20);
   for (const r of rows) {
-    out.push(`${MARK[r.verdict](r)} ${(r.got || '-').padEnd(5)} [${r.group}] ${r.name}`);
+    out.push(`${(MARK[r.verdict] ?? ((x) => String(x.verdict).padEnd(13)))(r)} ${(r.got || '-').padEnd(5)} [${r.group}] ${r.name}`);
     if (r.verdict === 'pass') continue;
     if (r.verdict === 'suppressed') { out.push(`${pad}${r.was === 'fail' ? 'finding' : 'not run'} suppressed: ${r.suppressedBy}`, `${pad}id: ${r.id}`); continue; }
     if (r.verdict === 'skipped') { out.push(`${pad}${r.evidence}`); continue; }
@@ -58,6 +59,6 @@ export function renderText({ rows, summary, unusedIgnores, unusedRoutes = [] }) 
   for (const k of unusedRoutes) out.push(`warning: the route settings "${k}" matched no request`);
   const s = summary;
   out.push('', `${s.run} probes run - ${s.failed} findings (critical ${s.bySeverity.critical}, high ${s.bySeverity.high}, medium ${s.bySeverity.medium}, low ${s.bySeverity.low})`
-    + ` - ${s.suppressed} suppressed - ${s.notRun} not run${s.skipped ? ` - ${s.skipped} skipped by configuration` : ''}`);
+    + ` - ${s.suppressed} suppressed - ${s.notRun} not run${s.skipped ? ` - ${s.skipped} skipped by configuration` : ''}${s.info ? ` - ${s.info} info` : ''}`);
   return out.join('\n');
 }

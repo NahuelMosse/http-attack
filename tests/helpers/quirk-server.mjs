@@ -15,7 +15,7 @@ export async function startQuirkServer(q = {}) {
   const requests = [];
   const json = (res, s, body, extra = {}) => {
     if (res.headersSent) return;
-    const headers = { 'content-type': 'application/json', 'x-request-id': 'r', 'cache-control': 'no-store', ...extra };
+    const headers = { 'content-type': 'application/json', 'x-request-id': 'r', 'cache-control': 'no-store', ...(q.setCookie ? { 'set-cookie': 'sid=1; HttpOnly' } : {}), ...extra };
     if (q.bareItems && /^\/items\/[^/?]+/.test(res.req.url)) delete headers['x-request-id']; // item routes answer without the request id
     res.writeHead(s, headers);
     res.end(body === undefined ? '' : JSON.stringify(body));
@@ -27,14 +27,27 @@ export async function startQuirkServer(q = {}) {
     requests.push({ method: req.method, url: req.url, headers: req.headers });
     if (q.streamLimit && req.method === 'POST') {
       let n = 0;
-      req.on('data', (d) => { n += d.length; if (n > q.streamLimit) json(res, 413, { error: 'too large' }, { connection: 'close' }); });
+      req.on('data', (d) => {
+        n += d.length;
+        if (n <= q.streamLimit || res.headersSent) return;
+        if (q.streamReset) return req.socket.destroy(); // cut with a reset instead of a 413
+        if (q.bare413 && req.headers['transfer-encoding']) { res.writeHead(413, { 'content-type': 'application/json', connection: 'close' }); return res.end('{}'); } // a chunked body is refused without the common headers
+        json(res, q.streamStatus ?? 413, { error: 'too large' }, { connection: 'close' });
+      });
     }
     if (q.resetFirstOrigin && req.headers.origin && !resetDone.has(req.headers.origin)) { resetDone.add(req.headers.origin); return req.socket.destroy(); }
+    const foreignOrigin = req.headers.origin && req.headers.origin !== `http://${req.headers.host}`;
+    if (q.hostValidates && req.headers.host === 'attacker.example') return json(res, q.hostValidates === true ? 422 : q.hostValidates, { error: 'invalid' });
+    if (q.origin400 && req.method === 'POST' && foreignOrigin) return json(res, 400, { error: 'bad request' });
+    if (q.head500 && req.method === 'HEAD') { res.writeHead(500); return res.end(); }
     try {
       const url = new URL(req.url, 'http://x');
       const path = url.pathname;
       if (path === '/' || path === '/health') return json(res, 200, { ok: true });
       if (path === '/login') return json(res, 200, { login: true });
+      if (q.bearerScope && path === '/private') return json(res, 403, { error: 'forbidden' }, { 'www-authenticate': 'Bearer error="insufficient_scope"' });
+      if (q.basicRead && path === '/private') return json(res, 401, { error: 'unauthorized' }, { 'www-authenticate': 'Basic realm="api"' });
+      if (q.leak && path === q.leak) { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('API_TOKEN=abc\n'); }
       if (q.repoFile && path === '/.git/config') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('[core]\n\tbare = false\n'); }
       if (q.publicRead && path === '/catalog') return json(res, 200, [{ id: 1, name: 'one' }]);
       if (q.openWrite && path === '/open' && req.method === 'POST') { await readBody(req); return json(res, 201, { id: ++seq }, { location: `/open/${seq}` }); }
@@ -51,13 +64,25 @@ export async function startQuirkServer(q = {}) {
       if (path === '/things' && req.method === 'POST') { // POST that stores without a unique key, or idempotently
         if (!who) return unauthorized(res);
         const b = JSON.parse((await readBody(req)).toString() || '{}');
+        // The first create is a 201; a repeated key is a 302. The value picks the 201's Location and the 302's target:
+        // true: /things/<id>, back to the form · 'bare-item'/'bare-form': no Location, to the item/the form · 'absolute': absolute URL, to the item.
+        if (q.conflictRedirect) {
+          const mode = q.conflictRedirect;
+          const key = b.sku ?? b.key;
+          const hit = things.find((t) => t.key === key);
+          if (hit) return json(res, 302, undefined, { location: mode === 'bare-item' || mode === 'absolute' ? `/things/${hit.id}` : '/things/new?error=exists' });
+          const t = { id: ++seq, key };
+          things.push(t);
+          const location = mode === 'absolute' ? `http://${req.headers.host}/things/${t.id}` : `/things/${t.id}`;
+          return json(res, 201, t, String(mode).startsWith('bare') ? {} : { location });
+        }
         if (q.storedDuplicates || q.idempotentCreate) {
           await new Promise((r) => setTimeout(r, 20));
           const hit = q.idempotentCreate && things.find((t) => t.key === b.key);
-          if (hit) return json(res, 200, hit, { location: `/things/${hit.id}` });
+          if (hit) return json(res, q.prg ? 303 : 200, hit, { location: `/things/${hit.id}` });
           const t = { id: ++seq, key: b.key };
           things.push(t);
-          return json(res, 201, t, { location: `/things/${t.id}` });
+          return json(res, q.prg ? 303 : 201, t, { location: `/things/${t.id}` });
         }
       }
 

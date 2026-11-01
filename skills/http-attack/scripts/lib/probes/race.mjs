@@ -1,5 +1,6 @@
 import { connect } from 'node:net';
-import { wire } from '../body.mjs';
+import { switchToJsonOn415, wire } from '../body.mjs';
+import { granted } from '../http.mjs';
 
 // Identical creates at once: check-then-insert lets more than one through, or turns the constraint violation into a 500.
 // Last-byte synchronization over raw sockets: every connection gets its request minus the final byte, then the final bytes go
@@ -42,9 +43,15 @@ const parseResponse = (buf) => {
   return { s: Number(m[1]), headers, text: chunked ? decodeChunked(text) : text, complete };
 };
 
-// The identity of the item a success created: its Location, else the id in the JSON body.
+// The last id-like segment (a number, a UUID, long hex) of a Location's path, without origin and query; null if none.
+const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})$/i;
+const locationId = (location) => (location ?? '').split(/[?#]/)[0].replace(/^[a-z]+:\/\/[^/]+/i, '')
+  .split('/').filter((seg) => ID_SEGMENT.test(seg)).at(-1) ?? null;
+
+// The identity of the item a success created: the id in its Location, else the id in the JSON body.
 const identityOf = (r) => {
-  if (r.headers.location) return r.headers.location;
+  const fromLocation = locationId(r.headers.location);
+  if (fromLocation) return `id:${fromLocation}`;
   try { const j = JSON.parse(r.text); const id = j?.id ?? j?.data?.id ?? j?.item?.id; return id === undefined ? null : `id:${id}`; } catch { return null; }
 };
 
@@ -88,6 +95,8 @@ export async function raceProbe(run, u) {
     await new Promise((r) => setTimeout(r, PACER_LEAD_MS));
     for (const c of racers) if (c.sock && !c.sock.destroyed) c.sock.write(c.last);
     const [, ...all] = await Promise.all([pacer.settled, ...racers.map((c) => c.settled)]);
+    // A form refused with 415 by every racer is an API that wants JSON: the race is tried again as JSON.
+    if (all.every((x) => x.s === 415) && switchToJsonOn415(u, 415, st)) { attempt--; continue; }
     const verdict = judge(all);
     last = { ...verdict, attempt };
     if (verdict.kind !== 'pass') break;
@@ -95,7 +104,9 @@ export async function raceProbe(run, u) {
 
   function judge(all) {
     const codes = all.map((x) => x.s ?? `drop:${x.err}`);
-    const created = all.filter((x) => x.s >= 200 && x.s < 300);
+    // A 3xx is a success too when it redirects to an item (POST/redirect/GET, or the one that already exists): granted, and
+    // its Location names an id. Any other redirect (back to a form) is a rejection.
+    const created = all.filter((x) => (x.s >= 200 && x.s < 300) || (x.s >= 300 && x.s < 400 && granted(x) && locationId(x.headers.location)));
     const five = all.filter((x) => x.s >= 500).length;
     const drop = all.filter((x) => x.s === null).length;
     const joined = codes.join(' ');

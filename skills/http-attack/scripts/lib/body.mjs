@@ -13,6 +13,17 @@ const isFree = (v) => typeof v === 'string' && !FORMATTED.test(v);
 
 export const isJsonBody = (w) => /^\s*[{[]/.test(w.body) || /json/i.test(w.contentType ?? '');
 
+// A form body (a=1&b=2) as the same fields in a JSON object, every value a string.
+export const formToJson = (body) => JSON.stringify(Object.fromEntries(new URLSearchParams(body)));
+
+// A form write with no declared media type answered 415: the API wants JSON and refused the form before looking at anything
+// else, so the write is sent as JSON from then on. Returns true when the write was switched.
+export function switchToJsonOn415(w, status, settings = {}) {
+  if (status !== 415 || isJsonBody(w) || w.contentType || settings.contentType) return false;
+  w.body = formToJson(w.body);
+  return true;
+}
+
 const unescapePointer = (s) => s.replace(/~1/g, '/').replace(/~0/g, '~');
 // "/item/email" or "item.email" or "email" => ['item','email']
 export const pointerPath = (p) => (p.startsWith('/') ? p.slice(1).split('/').map(unescapePointer) : p.split('.'));

@@ -49,10 +49,10 @@ test('the docs explain the paired server-error and stack-leak ids and the linger
 });
 
 test('every option in --help is accepted by the parser and no flag is documented that does not exist', async () => {
-  const { HELP, FLAGS_WITH_VALUE } = await import('../skills/http-attack/scripts/lib/args.mjs');
+  const { HELP, FLAGS_WITH_VALUE, BOOLEAN_FLAGS } = await import('../skills/http-attack/scripts/lib/args.mjs');
   const flags = new Set([...HELP.matchAll(/^\s+(--[a-z-]+)/gm)].map((m) => m[1]));
-  for (const f of flags) assert.ok(FLAGS_WITH_VALUE.has(f) || ['--csrf', '--help'].includes(f), `${f} is in --help but not parsed`);
-  for (const f of FLAGS_WITH_VALUE) assert.ok(flags.has(f), `${f} is parsed but missing from --help`);
+  for (const f of flags) assert.ok(FLAGS_WITH_VALUE.has(f) || BOOLEAN_FLAGS.has(f), `${f} is in --help but not parsed`);
+  for (const f of [...FLAGS_WITH_VALUE, ...BOOLEAN_FLAGS]) assert.ok(flags.has(f), `${f} is parsed but missing from --help`);
 });
 
 test('every eval case grants only read tools and the Skill tool, in its frontmatter', () => {

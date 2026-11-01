@@ -35,6 +35,11 @@ export class Run {
     this.add({ ...spec, id: `not-run:${spec.probe}:${spec.target}`, rule: 'not-run', verdict: 'not-run', got: '', expected: '', evidence: why });
   }
 
+  // Seen and reported, but neither a finding nor a pass: what an option (such as --strict-host) would turn into a finding.
+  info(spec, got, expected, evidence) {
+    this.add({ ...spec, id: `info:${spec.probe}:${spec.target}`, verdict: 'info', got: String(got ?? ''), expected, evidence });
+  }
+
   // Not applicable because the configuration says so (not a gap, not a pass).
   skipped(spec, why) {
     this.add({ ...spec, id: `skipped:${spec.probe}:${spec.target}`, verdict: 'skipped', got: '', expected: '', evidence: why });

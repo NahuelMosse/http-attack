@@ -35,7 +35,12 @@ Exit codes: `0` no findings (after suppressions), `1` findings, `2` the run coul
 app down, no probe run, or a probe that could not run).
 
 `--format json` prints `{ schemaVersion: 1, summary, findings, rows }`. A finding id is `<rule>:<probe>:<target>`, for
-example `server-error:path-param-letters:GET /items/{id}`; it never contains generated values.
+example `server-error:path-param-letters:GET /items/{id}`; it never contains generated values. A row's `verdict` is `pass`,
+`fail`, `not-run`, `skipped`, `suppressed` or `info` (reported, never a finding, never an exit 1); `rule` is `null` on every
+row that is not a finding.
+
+Flags beyond the routes and credentials: `--origin-check always|cookie`, `--no-ambient`, `--host-check`, `--strict-host`,
+`--leak-path <path>` (repeatable), `--openapi <file>` and `--json`, described below.
 
 ## Config reference
 
