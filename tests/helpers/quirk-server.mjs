@@ -31,7 +31,7 @@ export async function startQuirkServer(q = {}) {
         n += d.length;
         if (n <= q.streamLimit || res.headersSent) return;
         if (q.streamReset) return req.socket.destroy(); // cut with a reset instead of a 413
-        if (q.bare413) { res.writeHead(413, { 'content-type': 'application/json', connection: 'close' }); return res.end('{}'); } // without the common headers
+        if (q.bare413 && req.headers['transfer-encoding']) { res.writeHead(413, { 'content-type': 'application/json', connection: 'close' }); return res.end('{}'); } // a chunked body is refused without the common headers
         json(res, 413, { error: 'too large' }, { connection: 'close' });
       });
     }
