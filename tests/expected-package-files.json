@@ -3,6 +3,8 @@
   "LICENSE",
   "README.md",
   "package.json",
+  "skills/http-attack/LICENSE",
+  "skills/http-attack/NOTICES.md",
   "skills/http-attack/SKILL.md",
   "skills/http-attack/references/fixes.md",
   "skills/http-attack/scripts/http-attack.mjs",
