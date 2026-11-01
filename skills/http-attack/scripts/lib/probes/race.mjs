@@ -1,5 +1,6 @@
 import { connect } from 'node:net';
 import { switchToJsonOn415, wire } from '../body.mjs';
+import { granted } from '../http.mjs';
 
 // Identical creates at once: check-then-insert lets more than one through, or turns the constraint violation into a 500.
 // Last-byte synchronization over raw sockets: every connection gets its request minus the final byte, then the final bytes go
@@ -47,6 +48,10 @@ const identityOf = (r) => {
   if (r.headers.location) return r.headers.location;
   try { const j = JSON.parse(r.text); const id = j?.id ?? j?.data?.id ?? j?.item?.id; return id === undefined ? null : `id:${id}`; } catch { return null; }
 };
+
+// The route of a Location: its path without the query, with id-like segments (numbers, UUIDs, long hex) as {id}.
+const routeOf = (location) => (location ?? '').split(/[?#]/)[0].replace(/^[a-z]+:\/\/[^/]+/i, '')
+  .split('/').map((seg) => (/^\d+$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{16,}$/i.test(seg) ? '{id}' : seg)).join('/');
 
 export async function raceProbe(run, u) {
   const { client, opts } = run;
@@ -97,8 +102,12 @@ export async function raceProbe(run, u) {
 
   function judge(all) {
     const codes = all.map((x) => x.s ?? `drop:${x.err}`);
-    // A 3xx is a success too: a create that redirects to the item (POST/redirect/GET) or to the one that already exists.
-    const created = all.filter((x) => x.s >= 200 && x.s < 400);
+    // A 3xx is a success too when it redirects to the item (POST/redirect/GET) or to the one that already exists: granted, and
+    // its Location on the route of the 2xx's Location (or of the first such redirect). Any other redirect is a rejection.
+    const two = all.filter((x) => x.s >= 200 && x.s < 300);
+    const redirects = all.filter((x) => x.s >= 300 && x.s < 400 && granted(x));
+    const route = routeOf((two.find((x) => x.headers.location) ?? redirects[0])?.headers.location);
+    const created = [...two, ...redirects.filter((x) => routeOf(x.headers.location) === route)];
     const five = all.filter((x) => x.s >= 500).length;
     const drop = all.filter((x) => x.s === null).length;
     const joined = codes.join(' ');

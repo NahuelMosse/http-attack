@@ -52,3 +52,19 @@ test('a race whose successes redirect (POST/redirect/GET) is judged like 2xx suc
     assert.equal(r.row('ok:race-identical-creates:POST /things')?.verdict, 'pass');
   });
 });
+
+test('a race where the repeated creates redirect elsewhere (back to the form) is one create and the rest refused', () => withServer({ conflictRedirect: true }, async (s) => {
+  const r = await attack(s.url, [...ALICE, '--unique', 'POST /things {"sku":"k"}']);
+  assert.equal(r.row('ok:race-identical-creates:POST /things')?.verdict, 'pass');
+}));
+
+test('with a declared limit, a never-ending body refused with a 4xx other than 413 is a finding', () => withServer({ streamLimit: 3 << 20, streamStatus: 400 }, async (s) => {
+  const r = await attack(s.url, [...ALICE, '--write', ITEM, ...LIMIT]);
+  assert.ok(r.has('no-body-limit:body-never-ends:POST /items'));
+}));
+
+test('HEAD on a write-only route answered 405 without Allow fails and does not pass', () => withServer({ noHead: true }, async (s) => {
+  const r = await attack(s.url, [...ALICE, '--write', ITEM]);
+  assert.ok(r.has('missing-allow:head:HEAD /items'));
+  assert.equal(r.row('ok:head:HEAD /items'), undefined);
+}));
