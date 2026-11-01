@@ -106,6 +106,20 @@ A `UNIQUE` constraint in the database, and map its violation to 409: Postgres `2
   count as a refusal), Express `csurf` replacements or a custom Origin check, Go `http.CrossOriginProtection` (1.25+).
 - A 302 to the login page for an unauthenticated request is a refusal.
 
+## origin and host: `foreign-origin-accepted`, `ambient-credentials`, `foreign-host-accepted`
+
+- `foreign-origin-accepted`: the same Origin check as for CSRF, applied to every route, whatever the credentials: refuse a
+  request whose `Origin` is present and is not the app's own (`Sec-Fetch-Site: cross-site` or `same-site` too).
+- `ambient-credentials`: an API declared free of ambient credentials sets no cookie (keep sessions in a bearer token) and
+  never asks `WWW-Authenticate: Basic`, which makes the browser resend the credentials on its own.
+- `foreign-host-accepted`: list the hosts the app serves and answer 421 (or 400) to any other: Django `ALLOWED_HOSTS`, Rails
+  `config.hosts`, ASP.NET `AllowedHosts`, a `server_name` default that returns 444 in nginx. It blocks DNS rebinding.
+
+## contract: `undocumented-status`
+
+Either the contract is missing a status the app really answers (add it, with its body), or the app answers a status it
+should not (usually a 500 or a 400 where the contract says 422): fix the app.
+
 ## durability: `not-durable`
 
 Commit before answering; no in-memory store; migrations run on start.

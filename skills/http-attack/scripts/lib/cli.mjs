@@ -6,7 +6,9 @@ import { EXIT } from './registry.mjs';
 import { exitCode, renderJson, renderText, summarize } from './report.mjs';
 import { Run } from './run.mjs';
 import { accessProbes, csrfProbes, inferTemplate, legitWrite, notRunDependents, readsWithoutCredentials } from './probes/auth.mjs';
+import { openapiProbe } from './openapi.mjs';
 import { faultProbe } from './probes/fault.mjs';
+import { ambientProbe, foreignHostProbe, foreignOriginProbes } from './probes/origin.mjs';
 import { malformedInput } from './probes/input.mjs';
 import { parserProbes } from './probes/parser.mjs';
 import { pathProbes } from './probes/paths.mjs';
@@ -63,7 +65,21 @@ async function runAll(run) {
   for (const w of ready) await resourceProbes(run, w);
   for (const u of opts.uniques) await raceProbe(run, u);
   if (opts.csrf) for (const w of ready) await csrfProbes(run, w);
+  if (opts.noAmbient) {
+    const responses = ready.map((w) => ({ method: w.method, path: w.path, res: legits.get(w).res }));
+    for (const r of opts.reads) {
+      const res = await client.send('GET', r);
+      if (res.s !== null && res.s < 400) responses.push({ method: 'GET', path: r, res });
+    }
+    ambientProbe(run, responses);
+  } else if (opts.originCheck === 'always') {
+    for (const w of ready) await foreignOriginProbes(run, w.method, w.path, w);
+    for (const r of opts.reads) await foreignOriginProbes(run, 'GET', r);
+  }
+  for (const w of ready) await foreignHostProbe(run, w.method, w.path, w);
+  for (const r of opts.reads) await foreignHostProbe(run, 'GET', r);
   if (opts.faultSqlite || opts.faultCmd) await faultProbe(run, ready[0]);
+  if (opts.openapi) openapiProbe(run, opts.openapi);
 
   if (opts.common.length) {
     const wanted = `every response carries ${opts.common.join(', ')}`;

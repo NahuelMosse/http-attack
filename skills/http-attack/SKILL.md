@@ -1,6 +1,6 @@
 ---
 name: http-attack
-description: Break-test an HTTP API the user runs locally before shipping it. Sends malformed bodies, hostile paths, raw parser errors, concurrent duplicate creates, never-ending bodies, LIKE/SQL injection in search, database faults, missing auth, IDOR and CSRF, and reports each failure with its severity and the correct response. Use when asked to attack, harden, fuzz or break-test a local API, or to check it never answers 500. Not for code review, load tests, OpenAPI conformance, or hosts the user does not own.
+description: Break-test an HTTP API the user runs locally before shipping it. Sends malformed bodies, hostile paths, raw parser errors, concurrent duplicate creates, never-ending bodies, LIKE/SQL injection in search, database faults, missing auth, IDOR and CSRF, and reports each failure with its severity and the correct response. Use when asked to attack, harden, fuzz or break-test a local API, or to check it never answers 500. Not for code review, load tests, full OpenAPI conformance, or hosts the user does not own.
 ---
 
 # http-attack
@@ -72,6 +72,15 @@ Notes:
 - `--content-type application/vnd.api+json` for non-default media types; `--auth-header-name X-Auth-Token` when credentials
   travel in a custom header; `--auth-env VAR` / `--other-auth-env VAR` keep tokens off the command line.
 - Cookie authentication: add `--csrf` and pass the cookie with `--header "Cookie: ..."`.
+- `--origin-check always` sends every write and read from a foreign Origin (another site, another port, no `Sec-Fetch`,
+  `Origin: null`) with the given credentials, cookie or not; each must be refused. A 409, 422 or 400 there is `NOT RUN`: the
+  body was judged, not the origin. `--no-ambient` declares that no credential a browser sends on its own reaches the API: the
+  origin rows are replaced by one check (no legitimate response sets `Set-Cookie` or asks `WWW-Authenticate`).
+- Every write and read is also sent with a foreign `Host`. Accepted, it is an `info` row; with `--strict-host` it is a finding.
+- `--json` sends form bodies as JSON objects. Without it, a form write whose legitimate request answers 415 is sent as JSON
+  from then on, and the `legit-write` row says so.
+- `--openapi openapi.yaml` checks every status the app answered against the statuses the contract declares for that
+  operation (the most specific template; `2XX` and `default` count). A path the contract lacks is not judged.
 - Persistence is a two-step run around a restart: `--persist-save state.json`, restart the app, `--persist-verify state.json` (the file must be inside the working or temp
   directory, or the config must name its directory in `persistDir`).
 - Other databases: `faultCmd` (`"docker pause db"`) and `faultRestore` (`"docker unpause db"`) in the config file: any shell
@@ -121,9 +130,10 @@ The config can also hold `faultCmd`, `faultRestore`, `persistDir`, and list `wri
 
 ## Reading the report
 
-Each row is `pass`, `FAIL <severity>`, `NOT RUN`, `suppressed` or `skipped` (the config says it does not apply). Failures show
+Each row is `pass`, `FAIL <severity>`, `NOT RUN`, `suppressed`, `skipped` (the config says it does not apply) or `info`
+(seen, neither a pass nor a finding). Failures show
 `expected:`, `evidence:` and an `id:` that is stable between runs. `--format json` prints `{schemaVersion: 1, summary, findings,
-rows}`; the summary counts `run`, `passed`, `failed`, `suppressed`, `notRun`, `skipped` and findings by severity.
+rows}`; the summary counts `run`, `passed`, `failed`, `suppressed`, `notRun`, `skipped`, `info` and findings by severity.
 Exit codes: `0` no findings, `1` findings, `2` the run could not complete (bad argument, app down, crash, zero probes run, or
 some probe not run).
 
@@ -141,6 +151,8 @@ Every rule the script can emit; the finding id is `<rule>:<probe>:<target>`.
 | `file-served` | critical | a repo, secret or OS file came back over HTTP |
 | `csrf` | critical | a cookie-authenticated write from a foreign Origin was accepted |
 | `not-durable` | critical | a saved item is gone or different after a restart |
+| `foreign-origin-accepted` | high | a request from a foreign Origin was accepted (`--origin-check always`) |
+| `ambient-credentials` | high | with `--no-ambient`, a legitimate response sets Set-Cookie or asks WWW-Authenticate |
 | `connection-dropped` | high | the connection was closed without a response while the app stayed up |
 | `server-error` | high | a 5xx on client input (including path params, quotes and unique violations) |
 | `accepted-invalid` | high | input that must be refused got a 2xx/3xx (bad JSON, invalid UTF-8, wrong type, other methods) |
@@ -155,6 +167,8 @@ Every rule the script can emit; the finding id is `<rule>:<probe>:<target>`.
 | `stack-leak` | medium | a 5xx body leaks a stack trace, driver error or SQLSTATE |
 | `parser-no-common-headers` | medium | a parser-level error lacks the app's common headers |
 | `headers-missing` | medium | a response lacks a header every response must carry |
+| `foreign-host-accepted` | medium | a request with a foreign Host was accepted (`--strict-host`; an info row without it) |
+| `undocumented-status` | medium | with `--openapi`, the app answered a status the contract does not declare for that operation |
 | `missing-allow` | low | 405 without an `Allow` header |
 | `head-unsupported` | low | HEAD on a readable route answers 405 (RFC 9110 9.1) |
 | `not-run` | - | a probe could not reach a verdict; never a pass |
@@ -175,6 +189,9 @@ A 5xx whose body leaks internals is reported twice on purpose: `server-error` (t
 | faults | a legitimate write while the database is locked or broken (`--fault-sqlite`, or `faultCmd` in the config) | 503/500 with a generic body, the process keeps answering |
 | auth | each write and read without credentials; user B reads and deletes A's item (after checking B can use its own) | 401 (or a redirect to login); 404/403 for B |
 | csrf | write with a foreign `Origin`, another port of the same host, `Origin: null` | 4xx |
+| origin | `--origin-check always`: foreign Origin, another port, no `Sec-Fetch`, `Origin: null` with the given credentials; `--no-ambient`: no `Set-Cookie` or `WWW-Authenticate` | 4xx; no ambient credential |
+| host | each write and read with `Host: attacker.example` | 4xx (421) |
+| contract | `--openapi`: every status answered, per operation | a declared status |
 | durability | create, restart, read back | same status and body |
 
 Also check by hand what the script cannot: mass assignment (`"role":"admin"` on create/update), excessive data exposure, function-level
@@ -184,7 +201,7 @@ level 1 for the security floor of a whole application.
 
 ## What this skill does not do
 
-- Contract conformance against an OpenAPI schema and property-based input generation: Schemathesis.
+- Schema conformance against an OpenAPI file (only statuses are checked) and property-based input generation: Schemathesis.
 - Stateful sequence fuzzing over a whole API: RESTler.
 - Known-CVE and misconfiguration scanning of the stack: OWASP ZAP API scan or Nuclei templates.
 - Content discovery of unlinked routes: ffuf with a wordlist.

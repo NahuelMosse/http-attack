@@ -15,7 +15,7 @@ export async function startQuirkServer(q = {}) {
   const requests = [];
   const json = (res, s, body, extra = {}) => {
     if (res.headersSent) return;
-    const headers = { 'content-type': 'application/json', 'x-request-id': 'r', 'cache-control': 'no-store', ...extra };
+    const headers = { 'content-type': 'application/json', 'x-request-id': 'r', 'cache-control': 'no-store', ...(q.setCookie ? { 'set-cookie': 'sid=1; HttpOnly' } : {}), ...extra };
     if (q.bareItems && /^\/items\/[^/?]+/.test(res.req.url)) delete headers['x-request-id']; // item routes answer without the request id
     res.writeHead(s, headers);
     res.end(body === undefined ? '' : JSON.stringify(body));

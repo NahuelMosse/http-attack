@@ -353,7 +353,7 @@ test('CSRF probes send the cookie only: a Bearer token next to it would skip the
   assert.ok(!r.findings.some((id) => id.startsWith('csrf:')), r.findings.join(', '));
   assert.equal(r.row('ok:origin-another-site:POST /items')?.verdict, 'pass');
   const named = await attack(s.url, ['--header', 'X-Token: alice', '--auth-header-name', 'X-Token', '--header', 'Cookie: session=alice', '--write', ITEM, '--csrf']);
-  const sent = s.requests.filter((q) => q.headers.origin && q.headers['x-token'] !== undefined);
+  const sent = s.requests.filter((q) => q.headers.origin && q.headers.host !== 'attacker.example' && q.headers['x-token'] !== undefined);
   assert.deepEqual(sent, [], 'a configured auth header is not sent with a CSRF probe');
   assert.equal(named.row('ok:origin-another-site:POST /items')?.verdict, 'pass');
 }));

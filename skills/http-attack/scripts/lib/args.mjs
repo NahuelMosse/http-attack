@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { formToJson } from './body.mjs';
 import { UsageError } from './errors.mjs';
 
 export const HELP = `http-attack: adversarial probes against an HTTP API running on this machine.
@@ -17,6 +18,8 @@ Routes
   --vary "<json-pointer | field>"    the body field that keeps requests apart (default: the first string with an @, else
                                      the first string), e.g. /item/email for {"item":{"email":...}}.
   --content-type <type>              the media type of every write body (default application/json, or a form).
+  --json                             send form bodies (a=1&b=2) as JSON objects of the same fields. Without it, a form
+                                     write whose legitimate request answers 415 is switched to JSON for the rest of the run.
 
 Credentials
   --header "Name: value"             sent on every request (user A). Repeatable.
@@ -30,7 +33,16 @@ Expectations
   --raw-exempt "<why>"               parser errors are answered by a proxy before the app: skip the common-header check there.
   --body-limit <bytes>               the documented body limit.
   --csrf                             the app authenticates with cookies: cross-origin writes must be refused.
-  --config <file>                    per-route expectations and suppressions (default ./http-attack.config.json if present).
+  --origin-check always|cookie       always: every write and read is also sent from a foreign Origin (another site, another
+                                     port, no Sec-Fetch, null) with the given credentials, and must be refused. cookie
+                                     (default): only the --csrf rows, with the session cookie.
+  --no-ambient                       the API takes no credential a browser sends on its own (cookie, HTTP auth): the
+                                     origin rows are replaced by one check, no legitimate response sets Set-Cookie or
+                                     asks WWW-Authenticate. Cannot be combined with --csrf.
+  --strict-host                      a request with a foreign Host that is accepted is a finding (default: an info row).
+  --openapi <file>                   an OpenAPI file (JSON or YAML): every status the app answered must be one the
+                                     contract declares for that operation.
+  --config <file>                   per-route expectations and suppressions (default ./http-attack.config.json if present).
 
 Faults and durability
   --fault-sqlite <file>              holds BEGIN EXCLUSIVE on the app's SQLite file while the first --write is sent.
@@ -121,7 +133,10 @@ export const requestSpec = (text, flag, { cwd, env, contentType }) => {
 export const FLAGS_WITH_VALUE = new Set(['--write', '--read', '--search', '--unique', '--item-path', '--vary', '--content-type', '--header',
   '--auth-env', '--auth-header-name', '--other-header', '--other-auth-env', '--common-headers', '--raw-exempt', '--body-limit', '--config',
   '--fault-sqlite', '--persist-save', '--persist-verify', '--race-count', '--race-attempts',
-  '--hang-ms', '--format']);
+  '--hang-ms', '--format', '--origin-check', '--openapi']);
+
+export const BOOLEAN_FLAGS = new Set(['--csrf', '--json', '--no-ambient', '--strict-host', '--help']);
+const BOOLEAN_OPTIONS = { '--csrf': 'csrf', '--json': 'json', '--no-ambient': 'noAmbient', '--strict-host': 'strictHost' };
 
 const LOOPBACK = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\]|[\w-]+\.localhost)$/i;
 
@@ -139,7 +154,8 @@ export const parseBase = (text, env = process.env) => {
 export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {}) {
   const opt = {
     writes: [], reads: [], searches: [], uniques: [], common: [], headers: {}, otherHeaders: {}, authHeaderNames: [],
-    csrf: false, format: 'text', help: false, raceCount: 8, raceAttempts: 1, hangMs: 6000,
+    csrf: false, json: false, noAmbient: false, strictHost: false, originCheck: 'cookie',
+    format: 'text', help: false, raceCount: 8, raceAttempts: 1, hangMs: 6000,
   };
   if (argv.includes('--help') || argv.includes('-h')) return { help: true, opt: { ...opt, help: true } };
   const base = parseBase(argv[0], env);
@@ -147,7 +163,7 @@ export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {})
   const pendingRequests = [];
   for (let i = 1; i < argv.length; i++) {
     const flag = argv[i];
-    if (flag === '--csrf') { opt.csrf = true; continue; }
+    if (flag in BOOLEAN_OPTIONS) { opt[BOOLEAN_OPTIONS[flag]] = true; continue; }
     need(FLAGS_WITH_VALUE.has(flag), `Unknown option ${flag}. See --help.`);
     need(i + 1 < argv.length, `${flag} needs a value.`);
     const value = argv[++i];
@@ -180,11 +196,19 @@ export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {})
       case '--race-attempts': opt.raceAttempts = intFlag(flag, value, 1, 20); break;
       case '--hang-ms': opt.hangMs = intFlag(flag, value, 100, 600_000); break;
       case '--format': need(value === 'text' || value === 'json', `--format wants text or json, got "${value}".`); opt.format = value; break;
+      case '--origin-check': need(value === 'always' || value === 'cookie', `--origin-check wants always or cookie, got "${value}".`); opt.originCheck = value; break;
+      case '--openapi': opt.openapi = resolve(cwd, unmangle(value, env)); break;
       default: throw new UsageError(`Unknown option ${flag}.`);
     }
   }
   need(!Object.keys(opt.otherHeaders).length || !Object.entries(opt.otherHeaders).every(([k, v]) => opt.headers[k] === v),
     'The credentials for user B are the same credentials as user A: the ownership rows would prove nothing.');
-  for (const [list, flag, value] of pendingRequests) opt[list].push(requestSpec(value, flag, { cwd, env, contentType: opt.contentType }));
+  need(!(opt.noAmbient && opt.csrf), '--no-ambient says no cookie reaches the API, --csrf says the API authenticates with one: choose one.');
+  need(!opt.json || !opt.contentType || /json/i.test(opt.contentType), `--json sends JSON bodies, but --content-type is "${opt.contentType}".`);
+  for (const [list, flag, value] of pendingRequests) {
+    const spec = requestSpec(value, flag, { cwd, env, contentType: opt.contentType });
+    if (opt.json && spec.body && !/^\s*[{[]/.test(spec.body)) spec.body = formToJson(spec.body);
+    opt[list].push(spec);
+  }
   return { help: false, base, opt };
 }

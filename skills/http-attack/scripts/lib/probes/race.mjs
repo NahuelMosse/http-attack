@@ -1,5 +1,5 @@
 import { connect } from 'node:net';
-import { wire } from '../body.mjs';
+import { switchToJsonOn415, wire } from '../body.mjs';
 
 // Identical creates at once: check-then-insert lets more than one through, or turns the constraint violation into a 500.
 // Last-byte synchronization over raw sockets: every connection gets its request minus the final byte, then the final bytes go
@@ -88,6 +88,8 @@ export async function raceProbe(run, u) {
     await new Promise((r) => setTimeout(r, PACER_LEAD_MS));
     for (const c of racers) if (c.sock && !c.sock.destroyed) c.sock.write(c.last);
     const [, ...all] = await Promise.all([pacer.settled, ...racers.map((c) => c.settled)]);
+    // A form refused with 415 by every racer is an API that wants JSON: the race is tried again as JSON.
+    if (all.every((x) => x.s === 415) && switchToJsonOn415(u, 415, st)) { attempt--; continue; }
     const verdict = judge(all);
     last = { ...verdict, attempt };
     if (verdict.kind !== 'pass') break;

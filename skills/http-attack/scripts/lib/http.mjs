@@ -36,6 +36,7 @@ export function createClient(base, opts) {
   const credentialNames = [...ALWAYS_CREDENTIAL, ...opts.authHeaderNames];
   const withoutCredentials = (h) => Object.fromEntries(Object.entries(h).filter(([k]) => !credentialNames.includes(k)));
   const misses = new Map(); // "METHOD path" => { headers, statuses }: responses that lack a common header
+  const seen = []; // { method, path, s } of every probe response, for --openapi
 
   const noteHeaders = (method, path, status, headers) => {
     const missing = opts.common.filter((h) => headers?.[h] === undefined);
@@ -83,7 +84,10 @@ export function createClient(base, opts) {
       res.setEncoding('utf8');
       res.on('data', (d) => { if (text.length < BODY_CAP) text += d; });
       const result = (extra) => ({ s: res.statusCode, headers: res.headers, text, ...extra });
-      res.on('end', () => { if (common) noteHeaders(method, path, res.statusCode, res.headers); settle(result()); });
+      res.on('end', () => {
+        if (common) { noteHeaders(method, path, res.statusCode, res.headers); seen.push({ method, path: path.split('?')[0], s: res.statusCode }); }
+        settle(result());
+      });
       // Headers sent, then the connection cut: the answer is the status that was seen, flagged incomplete.
       res.on('aborted', () => settle(result({ truncated: true, err: 'ECONNRESET' })));
       res.on('close', () => settle(result({ truncated: !res.complete, err: res.complete ? undefined : 'ECONNRESET' })));
@@ -134,6 +138,6 @@ export function createClient(base, opts) {
     socket.on('close', () => finish(data.length ? parse(data.toString('latin1')) : { kind: 'closed' }));
   });
 
-  return { base, host, port, send, alive, stream, raw, misses, missesByRoute, withoutCredentials, noteHeaders,
+  return { base, host, port, send, alive, stream, raw, misses, missesByRoute, seen, withoutCredentials, noteHeaders,
     hasCredentials: () => Object.keys(opts.headers).some((k) => credentialNames.includes(k)) };
 }
