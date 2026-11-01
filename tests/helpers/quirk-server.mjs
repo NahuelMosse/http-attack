@@ -27,14 +27,26 @@ export async function startQuirkServer(q = {}) {
     requests.push({ method: req.method, url: req.url, headers: req.headers });
     if (q.streamLimit && req.method === 'POST') {
       let n = 0;
-      req.on('data', (d) => { n += d.length; if (n > q.streamLimit) json(res, 413, { error: 'too large' }, { connection: 'close' }); });
+      req.on('data', (d) => {
+        n += d.length;
+        if (n <= q.streamLimit || res.headersSent) return;
+        if (q.streamReset) return req.socket.destroy(); // cut with a reset instead of a 413
+        if (q.bare413) { res.writeHead(413, { 'content-type': 'application/json', connection: 'close' }); return res.end('{}'); } // without the common headers
+        json(res, 413, { error: 'too large' }, { connection: 'close' });
+      });
     }
     if (q.resetFirstOrigin && req.headers.origin && !resetDone.has(req.headers.origin)) { resetDone.add(req.headers.origin); return req.socket.destroy(); }
+    const foreignOrigin = req.headers.origin && req.headers.origin !== `http://${req.headers.host}`;
+    if (q.hostValidates && req.headers.host === 'attacker.example') return json(res, q.hostValidates === true ? 422 : q.hostValidates, { error: 'invalid' });
+    if (q.origin400 && req.method === 'POST' && foreignOrigin) return json(res, 400, { error: 'bad request' });
+    if (q.head500 && req.method === 'HEAD') { res.writeHead(500); return res.end(); }
     try {
       const url = new URL(req.url, 'http://x');
       const path = url.pathname;
       if (path === '/' || path === '/health') return json(res, 200, { ok: true });
       if (path === '/login') return json(res, 200, { login: true });
+      if (q.basicRead && path === '/private') return json(res, 401, { error: 'unauthorized' }, { 'www-authenticate': 'Basic realm="api"' });
+      if (q.leak && path === q.leak) { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('API_TOKEN=abc\n'); }
       if (q.repoFile && path === '/.git/config') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('[core]\n\tbare = false\n'); }
       if (q.publicRead && path === '/catalog') return json(res, 200, [{ id: 1, name: 'one' }]);
       if (q.openWrite && path === '/open' && req.method === 'POST') { await readBody(req); return json(res, 201, { id: ++seq }, { location: `/open/${seq}` }); }
@@ -54,10 +66,10 @@ export async function startQuirkServer(q = {}) {
         if (q.storedDuplicates || q.idempotentCreate) {
           await new Promise((r) => setTimeout(r, 20));
           const hit = q.idempotentCreate && things.find((t) => t.key === b.key);
-          if (hit) return json(res, 200, hit, { location: `/things/${hit.id}` });
+          if (hit) return json(res, q.prg ? 303 : 200, hit, { location: `/things/${hit.id}` });
           const t = { id: ++seq, key: b.key };
           things.push(t);
-          return json(res, 201, t, { location: `/things/${t.id}` });
+          return json(res, q.prg ? 303 : 201, t, { location: `/things/${t.id}` });
         }
       }
 
