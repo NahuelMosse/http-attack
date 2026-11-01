@@ -68,6 +68,9 @@ export async function legitRead(run, path) {
   return false;
 }
 
+// The HTTP authentication schemes a browser answers on its own; Bearer is never sent without the page's code.
+const AMBIENT_AUTH = /(^|,\s*)(basic|digest|negotiate|ntlm)\b/i;
+
 // `--no-ambient`: nothing a browser sends on its own reaches the API, so no legitimate response may set a cookie or ask
 // for HTTP authentication. `responses` are { method, path, res } of the legitimate requests.
 export function ambientProbe(run, responses) {
@@ -78,7 +81,7 @@ export function ambientProbe(run, responses) {
   }
   let found = false;
   for (const { method, path, res } of responses) {
-    const set = ['set-cookie', 'www-authenticate'].filter((h) => res.headers?.[h] !== undefined);
+    const set = ['set-cookie', 'www-authenticate'].filter((h) => res.headers?.[h] !== undefined && (h !== 'www-authenticate' || AMBIENT_AUTH.test(res.headers[h])));
     if (!set.length) continue;
     found = true;
     const target = `${method} ${path.split('?')[0]}`;
