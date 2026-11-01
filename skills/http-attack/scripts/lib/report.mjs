@@ -47,7 +47,7 @@ export function renderText({ rows, summary, unusedIgnores, unusedRoutes = [] }) 
   const out = [];
   const pad = ' '.repeat(20);
   for (const r of rows) {
-    out.push(`${MARK[r.verdict](r)} ${(r.got || '-').padEnd(5)} [${r.group}] ${r.name}`);
+    out.push(`${(MARK[r.verdict] ?? ((x) => String(x.verdict).padEnd(13)))(r)} ${(r.got || '-').padEnd(5)} [${r.group}] ${r.name}`);
     if (r.verdict === 'pass') continue;
     if (r.verdict === 'suppressed') { out.push(`${pad}${r.was === 'fail' ? 'finding' : 'not run'} suppressed: ${r.suppressedBy}`, `${pad}id: ${r.id}`); continue; }
     if (r.verdict === 'skipped') { out.push(`${pad}${r.evidence}`); continue; }

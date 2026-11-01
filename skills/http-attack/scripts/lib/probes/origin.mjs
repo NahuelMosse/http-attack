@@ -1,4 +1,4 @@
-import { granted } from '../http.mjs';
+import { granted, is2xx } from '../http.mjs';
 import { wire } from '../body.mjs';
 
 const ATTACKER_ORIGIN = 'https://attacker.example';
@@ -55,6 +55,17 @@ export async function foreignHostProbe(run, method, path, w) {
   const evidence = `answered ${r.s} to Host: ${FOREIGN_HOST}`;
   if (run.opts.strictHost) run.fail('foreign-host-accepted', spec, r.s, expected, evidence);
   else run.info(spec, r.s, expected, `${evidence}; a finding only with --strict-host`);
+}
+
+// The legitimate GET a read's origin and host rows depend on. False (and those rows NOT RUN) unless it answers 2xx.
+export async function legitRead(run, path) {
+  const target = `GET ${path.split('?')[0]}`;
+  const spec = { group: 'origin', probe: 'legit-read', target, name: `${target} legitimate request` };
+  const res = await run.client.send('GET', path);
+  if (await run.transportFault(res, spec, '2xx')) return false;
+  if (is2xx(res.s)) { run.pass(spec, res.s, '2xx'); return true; }
+  run.notRun(spec, `the legitimate read answered ${res.s}: its origin and host rows would prove nothing`);
+  return false;
 }
 
 // `--no-ambient`: nothing a browser sends on its own reaches the API, so no legitimate response may set a cookie or ask

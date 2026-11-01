@@ -50,7 +50,10 @@ test('a foreign Host: refused passes, accepted is info by default and a finding 
     assert.equal(r.row('ok:foreign-host:GET /items')?.verdict, 'pass');
   });
   await withServer({}, async (s) => {
-    const r = await attack(s.url, [...ALICE, '--write', ITEM, '--read', '/items']);
+    const byDefault = await attack(s.url, [...ALICE, '--write', ITEM, '--read', '/items']);
+    assert.ok(!byDefault.report.rows.some((x) => x.group === 'host'), 'the default adds no host row');
+    assert.ok(!s.requests.some((q) => q.headers.host === 'attacker.example'), 'no foreign Host goes out by default');
+    const r = await attack(s.url, [...ALICE, '--write', ITEM, '--read', '/items', '--host-check']);
     const info = r.row('info:foreign-host:POST /items');
     assert.equal(info?.verdict, 'info');
     assert.ok(!r.findings.some((id) => id.startsWith('foreign-host-accepted')));

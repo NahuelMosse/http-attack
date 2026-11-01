@@ -8,7 +8,8 @@ import { Run } from './run.mjs';
 import { accessProbes, csrfProbes, inferTemplate, legitWrite, notRunDependents, readsWithoutCredentials } from './probes/auth.mjs';
 import { openapiProbe } from './openapi.mjs';
 import { faultProbe } from './probes/fault.mjs';
-import { ambientProbe, foreignHostProbe, foreignOriginProbes } from './probes/origin.mjs';
+import { ambientProbe, foreignHostProbe, foreignOriginProbes, legitRead } from './probes/origin.mjs';
+import { formToJson } from './body.mjs';
 import { malformedInput } from './probes/input.mjs';
 import { parserProbes } from './probes/parser.mjs';
 import { pathProbes } from './probes/paths.mjs';
@@ -22,7 +23,7 @@ const MAX_MISSING_LISTED = 10;
 // Command-line options and the config file, merged: the command line wins, lists are concatenated.
 function mergeOptions(opt, config) {
   const lower = (list) => list.map((h) => String(h).trim().toLowerCase()).filter(Boolean);
-  return {
+  const merged = {
     ...opt,
     writes: [...config.writes, ...opt.writes],
     uniques: [...config.uniques, ...opt.uniques],
@@ -35,6 +36,8 @@ function mergeOptions(opt, config) {
     authHeaderNames: [...new Set([...lower(config.authHeaderNames ?? []), ...opt.authHeaderNames])],
     itemPath: opt.itemPath ?? config.itemPath,
   };
+  if (opt.json) for (const w of [...merged.writes, ...merged.uniques]) if (w.body && !/^\s*[{[]/.test(w.body)) w.body = formToJson(w.body);
+  return merged;
 }
 
 async function runAll(run) {
@@ -69,15 +72,22 @@ async function runAll(run) {
     const responses = ready.map((w) => ({ method: w.method, path: w.path, res: legits.get(w).res }));
     for (const r of opts.reads) {
       const res = await client.send('GET', r);
-      if (res.s !== null && res.s < 400) responses.push({ method: 'GET', path: r, res });
+      if (res.s !== null) responses.push({ method: 'GET', path: r, res });
     }
     ambientProbe(run, responses);
-  } else if (opts.originCheck === 'always') {
-    for (const w of ready) await foreignOriginProbes(run, w.method, w.path, w);
-    for (const r of opts.reads) await foreignOriginProbes(run, 'GET', r);
   }
-  for (const w of ready) await foreignHostProbe(run, w.method, w.path, w);
-  for (const r of opts.reads) await foreignHostProbe(run, 'GET', r);
+  const origin = !opts.noAmbient && opts.originCheck === 'always';
+  const host = opts.hostCheck || opts.strictHost;
+  for (const w of ready) {
+    if (origin) await foreignOriginProbes(run, w.method, w.path, w);
+    if (host) await foreignHostProbe(run, w.method, w.path, w);
+  }
+  // A read is attacked only once a legitimate GET with credentials answers 2xx: a refusal would otherwise pass every row.
+  if (origin || host) for (const r of opts.reads) {
+    if (!(await legitRead(run, r))) continue;
+    if (origin) await foreignOriginProbes(run, 'GET', r);
+    if (host) await foreignHostProbe(run, 'GET', r);
+  }
   if (opts.faultSqlite || opts.faultCmd) await faultProbe(run, ready[0]);
   if (opts.openapi) openapiProbe(run, opts.openapi);
 

@@ -44,7 +44,7 @@ const documents = (declared, code) => [...declared].some((d) => d === code || d.
 export function openapiProbe(run, file) {
   const spec = (probe, target, name) => ({ group: 'contract', probe, target, name });
   let ops;
-  try { ops = contractOf(readFileSync(file, 'utf8')); } catch (e) {
+  try { ops = contractOf(readFileSync(file, 'utf8').replace(/^\uFEFF/, '')); } catch (e) {
     run.notRun(spec('openapi', 'contract', `--openapi ${basename(file)}`), `the contract cannot be read: ${e.code ?? e.message}`);
     return;
   }

@@ -80,4 +80,11 @@ export async function pathProbes(run, { writes, itemTemplate }) {
     if (is2xx(res.s) && !/^\s*<(!doctype|html)/i.test(res.text) && marker.test(res.text)) run.fail('file-served', s, res.s, '404', 'the file content came back');
     else run.pass(s, res.s, '404 (an SPA index page is fine)');
   }
+  for (const p of run.opts.leakPaths ?? []) {
+    const s = spec('file-served', `GET ${p}`, `GET ${p} (file the app must not serve)`);
+    const res = await client.send('GET', p, { common: false });
+    if (await run.transportFault(res, s, '404')) continue;
+    if (is2xx(res.s) && res.text.trim() && !/^\s*<(!doctype|html)/i.test(res.text)) run.fail('file-served', s, res.s, '404', 'the file content came back');
+    else run.pass(s, res.s, '404 (an SPA index page is fine)');
+  }
 }

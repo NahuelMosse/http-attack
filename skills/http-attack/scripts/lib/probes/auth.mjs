@@ -63,6 +63,7 @@ export function notRunDependents(run, w, why) {
   for (const [group, probe] of groups) {
     if (group === 'csrf' && !csrf) continue;
     if (group === 'origin' && (originCheck !== 'always' || noAmbient)) continue;
+    if (group === 'host' && !run.opts.hostCheck && !run.opts.strictHost) continue;
     run.notRun({ group, probe, target, name: `${target} ${probe}` }, `the legitimate request failed: ${why}`);
   }
 }

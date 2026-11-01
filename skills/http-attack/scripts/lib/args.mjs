@@ -39,7 +39,9 @@ Expectations
   --no-ambient                       the API takes no credential a browser sends on its own (cookie, HTTP auth): the
                                      origin rows are replaced by one check, no legitimate response sets Set-Cookie or
                                      asks WWW-Authenticate. Cannot be combined with --csrf.
-  --strict-host                      a request with a foreign Host that is accepted is a finding (default: an info row).
+  --host-check                       every write and read is also sent with a foreign Host; accepted, it is an info row.
+  --strict-host                      the same, and an accepted foreign Host is a finding.
+  --leak-path <path>                 one more file the app must not serve (2xx with a non-HTML body is file-served). Repeatable.
   --openapi <file>                   an OpenAPI file (JSON or YAML): every status the app answered must be one the
                                      contract declares for that operation.
   --config <file>                   per-route expectations and suppressions (default ./http-attack.config.json if present).
@@ -119,13 +121,14 @@ export const checkBody = (body, contentType, flag, source) => {
   }
 };
 
-export const requestSpec = (text, flag, { cwd, env, contentType }) => {
+export const requestSpec = (text, flag, { cwd, env, contentType, json = false }) => {
   const [method, path, ...rest] = String(text ?? '').split(' ');
   need(method && path, `${flag} wants "<METHOD> <path> <body>", got "${text ?? ''}".`);
   need(/^[A-Za-z]+$/.test(method), `${flag}: "${method}" is not an HTTP method.`);
   let body = rest.join(' ');
   const fromFile = body.startsWith('@') ? body.slice(1) : null;
   if (fromFile) body = readBodyFile(fromFile, cwd, flag);
+  if (json && body && !/^\s*[{[]/.test(body)) body = formToJson(body);
   checkBody(body, contentType, flag, fromFile && `the body file "${fromFile}"`);
   return { method: method.toUpperCase(), path: toPath(path, env), body, contentType };
 };
@@ -133,10 +136,10 @@ export const requestSpec = (text, flag, { cwd, env, contentType }) => {
 export const FLAGS_WITH_VALUE = new Set(['--write', '--read', '--search', '--unique', '--item-path', '--vary', '--content-type', '--header',
   '--auth-env', '--auth-header-name', '--other-header', '--other-auth-env', '--common-headers', '--raw-exempt', '--body-limit', '--config',
   '--fault-sqlite', '--persist-save', '--persist-verify', '--race-count', '--race-attempts',
-  '--hang-ms', '--format', '--origin-check', '--openapi']);
+  '--hang-ms', '--format', '--origin-check', '--openapi', '--leak-path']);
 
-export const BOOLEAN_FLAGS = new Set(['--csrf', '--json', '--no-ambient', '--strict-host', '--help']);
-const BOOLEAN_OPTIONS = { '--csrf': 'csrf', '--json': 'json', '--no-ambient': 'noAmbient', '--strict-host': 'strictHost' };
+export const BOOLEAN_FLAGS = new Set(['--csrf', '--json', '--no-ambient', '--strict-host', '--host-check', '--help']);
+const BOOLEAN_OPTIONS = { '--csrf': 'csrf', '--json': 'json', '--no-ambient': 'noAmbient', '--strict-host': 'strictHost', '--host-check': 'hostCheck' };
 
 const LOOPBACK = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\]|[\w-]+\.localhost)$/i;
 
@@ -154,7 +157,7 @@ export const parseBase = (text, env = process.env) => {
 export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {}) {
   const opt = {
     writes: [], reads: [], searches: [], uniques: [], common: [], headers: {}, otherHeaders: {}, authHeaderNames: [],
-    csrf: false, json: false, noAmbient: false, strictHost: false, originCheck: 'cookie',
+    leakPaths: [], csrf: false, json: false, hostCheck: false, noAmbient: false, strictHost: false, originCheck: 'cookie',
     format: 'text', help: false, raceCount: 8, raceAttempts: 1, hangMs: 6000,
   };
   if (argv.includes('--help') || argv.includes('-h')) return { help: true, opt: { ...opt, help: true } };
@@ -197,7 +200,8 @@ export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {})
       case '--hang-ms': opt.hangMs = intFlag(flag, value, 100, 600_000); break;
       case '--format': need(value === 'text' || value === 'json', `--format wants text or json, got "${value}".`); opt.format = value; break;
       case '--origin-check': need(value === 'always' || value === 'cookie', `--origin-check wants always or cookie, got "${value}".`); opt.originCheck = value; break;
-      case '--openapi': opt.openapi = resolve(cwd, unmangle(value, env)); break;
+      case '--openapi': opt.openapi = resolve(cwd, value); break;
+      case '--leak-path': opt.leakPaths.push(toPath(value, env)); break;
       default: throw new UsageError(`Unknown option ${flag}.`);
     }
   }
@@ -206,9 +210,7 @@ export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {})
   need(!(opt.noAmbient && opt.csrf), '--no-ambient says no cookie reaches the API, --csrf says the API authenticates with one: choose one.');
   need(!opt.json || !opt.contentType || /json/i.test(opt.contentType), `--json sends JSON bodies, but --content-type is "${opt.contentType}".`);
   for (const [list, flag, value] of pendingRequests) {
-    const spec = requestSpec(value, flag, { cwd, env, contentType: opt.contentType });
-    if (opt.json && spec.body && !/^\s*[{[]/.test(spec.body)) spec.body = formToJson(spec.body);
-    opt[list].push(spec);
+    opt[list].push(requestSpec(value, flag, { cwd, env, contentType: opt.contentType, json: opt.json }));
   }
   return { help: false, base, opt };
 }
