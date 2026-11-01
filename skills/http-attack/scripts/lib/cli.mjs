@@ -111,7 +111,7 @@ export async function main(argv, io = {}) {
   try {
     const parsed = parseArgs(argv, { cwd, env });
     if (parsed.help) { out(`${HELP}\n`); return EXIT.OK; }
-    const config = loadConfig(parsed.opt.config, { cwd, env });
+    const config = loadConfig(parsed.opt.config, { cwd, env, json: parsed.opt.json });
     const opts = mergeOptions(parsed.opt, config);
     const client = createClient(parsed.base, opts);
     const run = new Run({ client, opts, config });

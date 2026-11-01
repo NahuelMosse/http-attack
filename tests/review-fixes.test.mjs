@@ -28,6 +28,11 @@ test('--no-ambient looks at every answered response: a 401 asking WWW-Authentica
   assert.match(r.row('ambient-credentials:no-ambient:GET /private').evidence, /www-authenticate/);
 }));
 
+test('--no-ambient: a 403 asking WWW-Authenticate Bearer is not ambient', () => withServer({ bearerScope: true }, async (s) => {
+  const r = await attack(s.url, [...ALICE, '--write', ITEM, '--read', '/private', '--no-ambient']);
+  assert.ok(!r.findings.some((id) => id.startsWith('ambient-credentials')));
+}));
+
 test('--openapi reads a file under a directory named git, and a contract that starts with a BOM', () => withServer({}, async (s) => {
   const dir = join(tempDir(), 'git');
   mkdirSync(dir);
@@ -47,6 +52,7 @@ test('--openapi judges a path by the most specific template that matches it', ()
   const file = contract(tempDir(), 'specific.json', { '/{a}/{b}': { get: { responses: { 599: {} } } }, ...LOOSE });
   const r = await attack(s.url, [...ALICE, '--write', ITEM, '--openapi', file]);
   assert.ok(!r.has('undocumented-status:openapi-200:GET /{a}/{b}'), 'the item read is judged by /items/{id}');
+  assert.equal(r.row('ok:openapi:responses')?.verdict, 'pass');
 }));
 
 test('--openapi sees the race answers: a 2xx-only contract flags the 409 of the identical creates', () => withServer({}, async (s) => {
@@ -74,6 +80,13 @@ test('--json with --content-type application/json accepts a form write: it is co
   assert.equal(r.stderr, '');
   assert.equal(r.row('ok:legit-write:POST /items')?.verdict, 'pass');
   assert.notEqual(r.code, 2, 'not a usage error');
+}));
+
+test('--json converts a config write declared as application/json before its body is checked', () => withServer({}, async (s) => {
+  const config = writeTemp(tempDir(), 'http-attack.config.json', JSON.stringify({ writes: [{ method: 'POST', path: '/items', contentType: 'application/json', body: 'name=Ana&email=ana@example.com' }] }));
+  const r = await attack(s.url, [...ALICE, '--json', '--config', config]);
+  assert.notEqual(r.code, 2, r.stderr);
+  assert.equal(r.row('ok:legit-write:POST /items')?.verdict, 'pass');
 }));
 
 test('--leak-path is repeatable: a 2xx with the file is a finding, a 404 passes', () => withServer({ leak: '/secret.txt' }, async (s) => {

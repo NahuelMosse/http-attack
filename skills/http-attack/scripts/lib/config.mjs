@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { UsageError } from './errors.mjs';
+import { formToJson } from './body.mjs';
 import { RULES } from './registry.mjs';
 import { checkBody, errorPosition, readBodyFile, toPath } from './args.mjs';
 
@@ -32,13 +33,14 @@ const checkRoute = (file, where, s, { top }) => {
   for (const k of ['vary', 'contentType', 'reason']) if (k in s && typeof s[k] !== 'string') fail(file, `${where}.${k} must be a string.`);
 };
 
-const requestOf = (file, where, r, cwd, env) => {
+const requestOf = (file, where, r, cwd, env, json) => {
   if (!r || typeof r !== 'object' || typeof r.path !== 'string') fail(file, `${where} needs a "path".`);
   let body = r.body ?? '';
   const fromFile = typeof body === 'string' && body.startsWith('@') ? body.slice(1) : null;
   if (typeof body === 'object') body = JSON.stringify(body);
   else if (fromFile) body = readBodyFile(fromFile, cwd, `${file} ${where}`);
   else if (typeof body !== 'string') fail(file, `${where}.body must be an object, a string or "@file".`);
+  if (json && body && !/^\s*[{[]/.test(body)) body = formToJson(body);
   checkBody(body, r.contentType, `${file} ${where}`, fromFile && `the body file "${fromFile}"`);
   return { method: String(r.method ?? 'POST').toUpperCase(), path: toPath(r.path, env), body, contentType: r.contentType };
 };
@@ -52,7 +54,7 @@ const checkIgnore = (file, entry, i) => {
   if (rule === 'not-run' && !/^not-run:[^*:]/.test(entry.id)) fail(file, `ignore[${i}]: "${entry.id}" would hide every probe that could not run: name the probe, as "not-run:<probe>" or "not-run:<probe>:<target>".`);
 };
 
-export function loadConfig(file, { cwd = process.cwd(), env = process.env } = {}) {
+export function loadConfig(file, { cwd = process.cwd(), env = process.env, json: toJson = false } = {}) {
   const explicit = file !== undefined;
   const path = resolve(cwd, file ?? DEFAULT_CONFIG_FILE);
   const empty = { settings: {}, routes: {}, usedRoutes: new Set(), ignore: [], persistIgnore: [], writes: [], reads: [], searches: [], uniques: [], path: null };
@@ -80,7 +82,7 @@ export function loadConfig(file, { cwd = process.cwd(), env = process.env } = {}
   for (const k of ['faultCmd', 'faultRestore', 'persistDir']) if (k in json && typeof json[k] !== 'string') fail(path, `"${k}" must be a string.`);
   if (json.faultRestore && !json.faultCmd) fail(path, '"faultRestore" needs "faultCmd".');
   const list = (k) => { const v = json[k] ?? []; if (!Array.isArray(v)) fail(path, `"${k}" must be a list.`); return v; };
-  const requests = (k) => list(k).map((r, i) => requestOf(path, `${k}[${i}]`, r, cwd, env));
+  const requests = (k) => list(k).map((r, i) => requestOf(path, `${k}[${i}]`, r, cwd, env, toJson));
   return {
     path,
     settings: Object.fromEntries(Object.entries(json).filter(([k]) => GENERAL_KEYS.includes(k))),
