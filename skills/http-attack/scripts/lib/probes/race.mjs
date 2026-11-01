@@ -43,15 +43,17 @@ const parseResponse = (buf) => {
   return { s: Number(m[1]), headers, text: chunked ? decodeChunked(text) : text, complete };
 };
 
-// The identity of the item a success created: its Location, else the id in the JSON body.
+// The last id-like segment (a number, a UUID, long hex) of a Location's path, without origin and query; null if none.
+const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{16,})$/i;
+const locationId = (location) => (location ?? '').split(/[?#]/)[0].replace(/^[a-z]+:\/\/[^/]+/i, '')
+  .split('/').filter((seg) => ID_SEGMENT.test(seg)).at(-1) ?? null;
+
+// The identity of the item a success created: the id in its Location, else the id in the JSON body.
 const identityOf = (r) => {
-  if (r.headers.location) return r.headers.location;
+  const fromLocation = locationId(r.headers.location);
+  if (fromLocation) return `id:${fromLocation}`;
   try { const j = JSON.parse(r.text); const id = j?.id ?? j?.data?.id ?? j?.item?.id; return id === undefined ? null : `id:${id}`; } catch { return null; }
 };
-
-// The route of a Location: its path without the query, with id-like segments (numbers, UUIDs, long hex) as {id}.
-const routeOf = (location) => (location ?? '').split(/[?#]/)[0].replace(/^[a-z]+:\/\/[^/]+/i, '')
-  .split('/').map((seg) => (/^\d+$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^[0-9a-f]{16,}$/i.test(seg) ? '{id}' : seg)).join('/');
 
 export async function raceProbe(run, u) {
   const { client, opts } = run;
@@ -102,12 +104,9 @@ export async function raceProbe(run, u) {
 
   function judge(all) {
     const codes = all.map((x) => x.s ?? `drop:${x.err}`);
-    // A 3xx is a success too when it redirects to the item (POST/redirect/GET) or to the one that already exists: granted, and
-    // its Location on the route of the 2xx's Location (or of the first such redirect). Any other redirect is a rejection.
-    const two = all.filter((x) => x.s >= 200 && x.s < 300);
-    const redirects = all.filter((x) => x.s >= 300 && x.s < 400 && granted(x));
-    const route = routeOf((two.find((x) => x.headers.location) ?? redirects[0])?.headers.location);
-    const created = [...two, ...redirects.filter((x) => routeOf(x.headers.location) === route)];
+    // A 3xx is a success too when it redirects to an item (POST/redirect/GET, or the one that already exists): granted, and
+    // its Location names an id. Any other redirect (back to a form) is a rejection.
+    const created = all.filter((x) => (x.s >= 200 && x.s < 300) || (x.s >= 300 && x.s < 400 && granted(x) && locationId(x.headers.location)));
     const five = all.filter((x) => x.s >= 500).length;
     const drop = all.filter((x) => x.s === null).length;
     const joined = codes.join(' ');

@@ -53,10 +53,14 @@ test('a race whose successes redirect (POST/redirect/GET) is judged like 2xx suc
   });
 });
 
-test('a race where the repeated creates redirect elsewhere (back to the form) is one create and the rest refused', () => withServer({ conflictRedirect: true }, async (s) => {
-  const r = await attack(s.url, [...ALICE, '--unique', 'POST /things {"sku":"k"}']);
-  assert.equal(r.row('ok:race-identical-creates:POST /things')?.verdict, 'pass');
-}));
+test('a race of one 201 and 302s back to the form or to the same item is one create', async () => {
+  for (const mode of [true, 'bare-item', 'bare-form', 'absolute']) {
+    await withServer({ conflictRedirect: mode }, async (s) => {
+      const r = await attack(s.url, [...ALICE, '--unique', 'POST /things {"sku":"k"}']);
+      assert.equal(r.row('ok:race-identical-creates:POST /things')?.verdict, 'pass', String(mode));
+    });
+  }
+});
 
 test('with a declared limit, a never-ending body refused with a 4xx other than 413 is a finding', () => withServer({ streamLimit: 3 << 20, streamStatus: 400 }, async (s) => {
   const r = await attack(s.url, [...ALICE, '--write', ITEM, ...LIMIT]);

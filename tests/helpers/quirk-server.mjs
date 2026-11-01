@@ -64,12 +64,17 @@ export async function startQuirkServer(q = {}) {
       if (path === '/things' && req.method === 'POST') { // POST that stores without a unique key, or idempotently
         if (!who) return unauthorized(res);
         const b = JSON.parse((await readBody(req)).toString() || '{}');
-        if (q.conflictRedirect) { // the first create is a 201; a repeated key redirects back to the form
+        // The first create is a 201; a repeated key is a 302. The value picks the 201's Location and the 302's target:
+        // true: /things/<id>, back to the form · 'bare-item'/'bare-form': no Location, to the item/the form · 'absolute': absolute URL, to the item.
+        if (q.conflictRedirect) {
+          const mode = q.conflictRedirect;
           const key = b.sku ?? b.key;
-          if (things.some((t) => t.key === key)) return json(res, 302, undefined, { location: '/things/new?error=exists' });
+          const hit = things.find((t) => t.key === key);
+          if (hit) return json(res, 302, undefined, { location: mode === 'bare-item' || mode === 'absolute' ? `/things/${hit.id}` : '/things/new?error=exists' });
           const t = { id: ++seq, key };
           things.push(t);
-          return json(res, 201, t, { location: `/things/${t.id}` });
+          const location = mode === 'absolute' ? `http://${req.headers.host}/things/${t.id}` : `/things/${t.id}`;
+          return json(res, 201, t, String(mode).startsWith('bare') ? {} : { location });
         }
         if (q.storedDuplicates || q.idempotentCreate) {
           await new Promise((r) => setTimeout(r, 20));
