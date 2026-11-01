@@ -97,7 +97,8 @@ export async function raceProbe(run, u) {
 
   function judge(all) {
     const codes = all.map((x) => x.s ?? `drop:${x.err}`);
-    const created = all.filter((x) => x.s >= 200 && x.s < 300);
+    // A 3xx is a success too: a create that redirects to the item (POST/redirect/GET) or to the one that already exists.
+    const created = all.filter((x) => x.s >= 200 && x.s < 400);
     const five = all.filter((x) => x.s >= 500).length;
     const drop = all.filter((x) => x.s === null).length;
     const joined = codes.join(' ');

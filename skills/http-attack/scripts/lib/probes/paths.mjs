@@ -62,13 +62,13 @@ export async function pathProbes(run, { writes, itemTemplate }) {
   const readable = [...new Set(opts.reads.map((x) => x.split('?')[0]))];
   const all = [...new Set([...writes.map((w) => w.path), ...readable])];
   for (const r of all) for (const m of ['HEAD', 'OPTIONS']) {
-    if (m === 'HEAD' && !readable.includes(r)) continue;
+    // A write-only route may refuse HEAD (405 with Allow), but never with a 5xx.
     const s = spec(m.toLowerCase(), `${m} ${r}`, `${m} ${r}`);
     const res = await client.send(m, r);
     const expected = '2xx, or 405 with Allow';
     if (await run.transportFault(res, s, expected)) continue;
     // Both findings can apply to one answer: HEAD refused, and without an Allow header.
-    if (res.s === 405 && m === 'HEAD') run.fail('head-unsupported', s, 405, 'HEAD answered like GET without the body (RFC 9110 9.1)');
+    if (res.s === 405 && m === 'HEAD' && readable.includes(r)) run.fail('head-unsupported', s, 405, 'HEAD answered like GET without the body (RFC 9110 9.1)');
     if (res.s === 405 && !res.headers.allow) run.fail('missing-allow', s, 405, '405 must name the allowed methods in Allow (RFC 9110 15.5.6)');
     if (res.s !== 405 || (m === 'OPTIONS' && res.headers.allow)) run.pass(s, res.s, expected);
   }
