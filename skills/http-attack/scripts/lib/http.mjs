@@ -68,7 +68,7 @@ export function createClient(base, opts) {
   // node:http, because fetch cannot send a path starting with // nor stream a slow body.
   // auth: 'a' (the default headers), 'none' (credentials removed), 'b' (the other user's credentials),
   // 'cookie' (only the session cookie, as a browser sends it: no token or API key header).
-  const send = (method, path, { body, type, headers = {}, auth = 'a', common = true } = {}) => new Promise((done) => {
+  const sendOnce = (method, path, { body, type, headers = {}, auth = 'a', common = true } = {}) => new Promise((done) => {
     const data = body === undefined ? null : Buffer.isBuffer(body) ? body : Buffer.from(body);
     const cookie = opts.headers.cookie === undefined ? {} : { cookie: opts.headers.cookie };
     const creds = auth === 'b' ? { ...withoutCredentials(opts.headers), ...opts.otherHeaders }
@@ -96,9 +96,22 @@ export function createClient(base, opts) {
     req.setTimeout(REQUEST_TIMEOUT_MS, () => req.destroy(new Error('timeout')));
     // Once the status line is in, a write error (EPIPE, ECONNRESET) is the server closing after answering early,
     // as Node does for a request with "Connection: close": the response events decide the outcome.
-    req.on('error', (e) => answered || settle({ s: null, err: e.code ?? e.message, headers: {}, text: '' }));
+    let written = false;
+    req.on('finish', () => { written = true; });
+    req.on('error', (e) => answered || settle({ s: null, err: e.code ?? e.message, headers: {}, text: '', written }));
     req.end(data ?? undefined);
   });
+
+  // A server that rejects a large body early and closes while the client is still writing can have its answer discarded
+  // by the reset (Windows drops unread data on RST): a cut with no answer counts only when a second try is cut too.
+  // Only a body cut before it was fully written is sent again: the server cannot have stored it.
+  const RACE_BODY = 64 << 10;
+  const send = async (method, path, options = {}) => {
+    const first = await sendOnce(method, path, options);
+    const large = options.body !== undefined && Buffer.byteLength(options.body) > RACE_BODY;
+    const cutEarly = first.s === null && !first.written && /^(ECONNRESET|EPIPE)$/.test(first.err ?? '');
+    return large && cutEarly ? sendOnce(method, path, options) : first;
+  };
 
   const alive = async () => (await send('GET', '/', { common: false })).s !== null;
 
