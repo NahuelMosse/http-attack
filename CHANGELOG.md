@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 - `--origin-check always`, `--no-ambient`, `--host-check` / `--strict-host`, `--openapi <file>`, `--json` and a repeatable
   `--leak-path`. A read's origin and host rows run only after its legitimate request answered 2xx.
