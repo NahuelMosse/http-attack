@@ -40,8 +40,12 @@ export async function resourceProbes(run, w) {
     const endless = spec(probe, `body that never ends (${label})`);
     if (limit + 1 > MAX_STREAM) { run.notRun(endless, `bodyLimit ${limit} is above the ${mb(MAX_STREAM)} MB this probe will send`); continue; }
     const expected = st.bodyLimit ? '413 once over the limit' : '413 once over the limit, or 408 / connection closed within the request timeout';
-    const v = await client.stream(w.method, w.path, { 'content-type': p.type, ...framing }, limit + 1, 64 << 10,
+    const send = () => client.stream(w.method, w.path, { 'content-type': p.type, ...framing }, limit + 1, 64 << 10,
       { stopAfterMs: opts.hangMs, prefix: json ? '{"x":"' : 'x=' });
+    // A server that answers 413 and closes while the client is still writing can have that answer discarded by the
+    // reset (Windows drops unread data on RST): a cut counts only when a second try is cut too.
+    let v = await send();
+    if (st.bodyLimit && v.kind === 'closed' && await client.alive()) v = await send();
     if (!(await client.alive())) run.fail('process-died', endless, v.s ?? v.code, expected, 'the app stopped answering');
     else if (v.kind === 'silent') run.fail('no-body-limit', endless, 'no answer', expected, `still reading after ${mb(v.sent)} MB (the limit is ${st.bodyLimit ? `${limit} bytes` : 'unknown: 2 MB assumed'}) and ${opts.hangMs} ms: no body limit, no timeout`);
     else if (v.kind === 'status' && !is4xx(v.s)) run.fail('no-body-limit', endless, v.s, expected);

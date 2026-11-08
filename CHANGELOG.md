@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.1.0
 
 - `--origin-check always`, `--no-ambient`, `--host-check` / `--strict-host`, `--openapi <file>`, `--json` and a repeatable
   `--leak-path`. A read's origin and host rows run only after its legitimate request answered 2xx.
 - The never-ending body is also sent with a large `Content-Length`; with a declared limit a reset instead of a 413 is a finding.
 - HEAD is sent to write-only routes too; the race counts a 3xx as a success (POST/redirect/GET).
 - `info` verdict; `rule` is `null` on rows that are not findings.
+- A large body cut by a reset with no answer is sent once more before it counts: on Windows the reset can discard the 413
+  the server already sent.
 
 ## 1.0.0
 
