@@ -1,5 +1,5 @@
 import { HELP, parseArgs } from './args.mjs';
-import { applyIgnores, loadConfig, unusedRoutes } from './config.mjs';
+import { applyIgnores, checkIgnore, loadConfig, unusedRoutes } from './config.mjs';
 import { UsageError } from './errors.mjs';
 import { createClient } from './http.mjs';
 import { EXIT } from './registry.mjs';
@@ -20,6 +20,13 @@ import { searchProbes } from './probes/search.mjs';
 
 const MAX_MISSING_LISTED = 10;
 
+// `--ignore` ids get the same checks as the config file's entries; one already in the config keeps its own reason.
+function cliIgnores(ids, own) {
+  const entries = [...new Set(ids)].filter((id) => !own.some((e) => e.id === id)).map((id) => ({ id, reason: 'ignored with --ignore' }));
+  entries.forEach((entry, i) => checkIgnore('--ignore', entry, i));
+  return entries;
+}
+
 // Command-line options and the config file, merged: the command line wins, lists are concatenated.
 function mergeOptions(opt, config) {
   const lower = (list) => list.map((h) => String(h).trim().toLowerCase()).filter(Boolean);
@@ -35,6 +42,7 @@ function mergeOptions(opt, config) {
     faultRestore: config.faultRestore,
     authHeaderNames: [...new Set([...lower(config.authHeaderNames ?? []), ...opt.authHeaderNames])],
     itemPath: opt.itemPath ?? config.itemPath,
+    ignore: [...config.ignore, ...cliIgnores(opt.ignore, config.ignore)],
   };
   if (opt.json) for (const w of [...merged.writes, ...merged.uniques]) if (w.body && !/^\s*[{[]/.test(w.body)) w.body = formToJson(w.body);
   return merged;
@@ -102,6 +110,32 @@ async function runAll(run) {
   }
 }
 
+function prepare(argv, { cwd, env }) {
+  const parsed = parseArgs(argv, { cwd, env });
+  if (parsed.help) return { parsed };
+  const config = loadConfig(parsed.opt.config, { cwd, env, json: parsed.opt.json });
+  const opts = mergeOptions(parsed.opt, config);
+  const client = createClient(parsed.base, opts);
+  return { parsed, config, opts, client, run: new Run({ client, opts, config }) };
+}
+
+async function execute({ parsed, config, opts, run }) {
+  await runAll(run);
+  const unusedIgnores = applyIgnores(run.rows, opts.ignore);
+  const summary = summarize(run.rows);
+  return { base: parsed.base.origin, rows: run.rows, summary, unusedIgnores, unusedRoutes: unusedRoutes(config) };
+}
+
+// The programmatic entry: takes the CLI arguments, returns the report (with its `exitCode`) instead of printing it.
+// Usage problems reject with a UsageError; the help and the persistence steps belong to the command line.
+export async function attack(argv, { cwd = process.cwd(), env = process.env } = {}) {
+  const ctx = prepare(argv, { cwd, env });
+  if (ctx.parsed.help) throw new UsageError('--help belongs to the command line.');
+  if (ctx.opts.persistSave || ctx.opts.persistVerify) throw new UsageError('--persist-save and --persist-verify belong to the command line.');
+  const report = await execute(ctx);
+  return { ...report, exitCode: exitCode(report.summary) };
+}
+
 // Returns the exit code; output goes through `io` so tests can capture it.
 export async function main(argv, io = {}) {
   const out = io.stdout ?? ((s) => process.stdout.write(s));
@@ -109,31 +143,31 @@ export async function main(argv, io = {}) {
   const env = io.env ?? process.env;
   const cwd = io.cwd ?? process.cwd();
   try {
-    const parsed = parseArgs(argv, { cwd, env });
-    if (parsed.help) { out(`${HELP}\n`); return EXIT.OK; }
-    const config = loadConfig(parsed.opt.config, { cwd, env, json: parsed.opt.json });
-    const opts = mergeOptions(parsed.opt, config);
-    const client = createClient(parsed.base, opts);
-    const run = new Run({ client, opts, config });
+    const ctx = prepare(argv, { cwd, env });
+    const { parsed, config, opts, client, run } = ctx;
+    if (parsed.help) { out(`${HELP}
+`); return EXIT.OK; }
 
     if (opts.persistSave || opts.persistVerify) {
       checkPersistPath(opts.persistSave ?? opts.persistVerify, config, cwd);
       run.itemPath = opts.itemPath;
       if (!(await client.alive())) throw new UsageError(`The app does not answer at ${parsed.base.origin}.`);
       const result = opts.persistSave ? await persistSave(run, opts.persistSave) : await persistVerify(run, opts.persistVerify);
-      out(opts.format === 'json' ? `${JSON.stringify({ schemaVersion: 1, ok: result.ok, ...result.data }, null, 2)}\n` : `${result.message}\n`);
+      out(opts.format === 'json' ? `${JSON.stringify({ schemaVersion: 1, ok: result.ok, ...result.data }, null, 2)}
+` : `${result.message}
+`);
       return result.ok ? EXIT.OK : EXIT.FINDINGS;
     }
 
-    await runAll(run);
-    const unusedIgnores = applyIgnores(run.rows, config.ignore);
-    const summary = summarize(run.rows);
-    const report = { base: parsed.base.origin, rows: run.rows, summary, unusedIgnores, unusedRoutes: unusedRoutes(config) };
-    out(`${opts.format === 'json' ? renderJson(report) : renderText(report)}\n`);
-    return exitCode(summary);
+    const report = await execute(ctx);
+    out(`${opts.format === 'json' ? renderJson(report) : renderText(report)}
+`);
+    return exitCode(report.summary);
   } catch (e) {
-    if (e instanceof UsageError) err(`http-attack: ${e.message}\n`);
-    else err(`http-attack crashed: ${e?.stack ?? e}\n`);
+    if (e instanceof UsageError) err(`http-attack: ${e.message}
+`);
+    else err(`http-attack crashed: ${e?.stack ?? e}
+`);
     return EXIT.ERROR;
   }
 }

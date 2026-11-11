@@ -324,6 +324,21 @@ test('the config file suppresses with a reason and reports the counts; unused ig
   assert.ok(readFileSync(join(dir, 'http-attack.config.json'), 'utf8').includes('reason'));
 }));
 
+test('--ignore adds to the ignore list of the config file, repeatable or comma-separated, and rejects what the config would', () => withServer({ repoFile: true }, async (s) => {
+  const ignore = [{ id: 'file-served:file-served:GET /.git/config', reason: 'the fixture serves it on purpose' }];
+  const r = await attack(s.url, [...ALICE, '--write', ITEM, ...config(tempDir(), { ignore }),
+    '--ignore', 'file-served:file-served:GET /.git/config', '--ignore', 'idor:*,csrf:nothing', '--ignore', 'not-run:idor']);
+  assert.equal(r.row('file-served:file-served:GET /.git/config').suppressedBy, 'the fixture serves it on purpose', 'the config entry keeps its reason');
+  assert.equal(r.row('not-run:idor:POST /items')?.verdict, 'suppressed');
+  assert.match(r.row('not-run:idor:POST /items').suppressedBy, /--ignore/);
+  assert.deepEqual(r.report.unusedIgnores, ['idor:*', 'csrf:nothing']);
+  for (const [bad, message] of [['*', /does not start with a known rule/], ['not-run', /name the probe/]]) {
+    const refused = await runCli([s.url, '--write', ITEM, '--ignore', bad]);
+    assert.equal(refused.code, 2);
+    assert.match(refused.stderr, message);
+  }
+}));
+
 test('"not-run:<probe>" suppresses the NOT RUN rows of that probe and no other', () => withServer({}, async (s) => {
   const ignore = [{ id: 'not-run:legit-write', reason: 'the create needs a field this run does not know' }];
   const r = await attack(s.url, [...ALICE, '--write', 'POST /items {"nope":1}', ...config(tempDir(), { ignore })]);
