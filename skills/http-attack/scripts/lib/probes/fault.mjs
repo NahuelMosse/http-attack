@@ -15,7 +15,9 @@ const importSqlite = async () => {
   try { return await import('node:sqlite'); } catch { return null; } finally { process.emitWarning = emit; }
 };
 
-const runShell = (command) => spawnSync(command, { shell: true, encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS });
+const runCommand = (cmd) => Array.isArray(cmd)
+  ? spawnSync(cmd[0], cmd.slice(1), { encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS, windowsHide: true })
+  : spawnSync(cmd, { shell: true, encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS });
 
 // Fault injection: the database fails while a legitimate write arrives. Expected: one 5xx with the generic error body,
 // and the process stays up. Two injectors: an exclusive lock on a SQLite file, or any shell command with its restore.
@@ -38,14 +40,14 @@ export async function faultProbe(run, w) {
     try { db.exec('BEGIN EXCLUSIVE'); } catch (e) { db.close(); return run.notRun(spec, `could not lock the database: ${e.message}`); }
     release = () => { try { db.exec('ROLLBACK'); } catch { /* the lock was already gone */ } db.close(); };
   } else {
-    const started = runShell(opts.faultCmd);
+    const started = runCommand(opts.faultCmd);
     if (started.status !== 0) {
-      if (opts.faultRestore) runShell(opts.faultRestore);
+      if (opts.faultRestore) runCommand(opts.faultRestore);
       return run.notRun(spec, `faultCmd failed (${started.error?.code ?? `exit ${started.status}`}): ${(started.stderr || started.stdout || '').trim().slice(0, 200)}`);
     }
     release = () => {
       if (!opts.faultRestore) return;
-      const restored = runShell(opts.faultRestore);
+      const restored = runCommand(opts.faultRestore);
       if (restored.status !== 0) process.stderr.write(`faultRestore failed (exit ${restored.status}): the fault may still be active.\n`);
     };
   }
