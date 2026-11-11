@@ -8,11 +8,11 @@ import * as entry from '../skills/http-attack/scripts/index.mjs';
 test('attack() resolves to the report, with --ignore applied and the exit code', async () => {
   const s = await startQuirkServer({});
   try {
-    const report = await entry.attack([s.url, '--hang-ms', '600', ...ALICE, '--write', ITEM, '--ignore', 'not-run:idor,not-run:csrf']);
+    const report = await entry.attack([s.url, '--hang-ms', '600', ...ALICE, '--write', ITEM, '--ignore', 'not-run:idor']);
     assert.equal(report.base, s.url);
     assert.ok(report.rows.length > 10);
     assert.ok([0, 1, 2].includes(report.exitCode));
-    assert.equal(report.rows.find((r) => r.id === 'not-run:idor')?.verdict, 'suppressed');
+    assert.equal(report.rows.find((r) => r.id === 'not-run:idor:POST /items')?.verdict, 'suppressed');
     assert.match(entry.renderJson(report), /"schemaVersion": 1/);
     assert.match(entry.renderText(report), /pass/);
   } finally { await s.close(); }

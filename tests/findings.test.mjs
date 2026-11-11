@@ -329,8 +329,8 @@ test('--ignore adds to the ignore list of the config file, repeatable or comma-s
   const r = await attack(s.url, [...ALICE, '--write', ITEM, ...config(tempDir(), { ignore }),
     '--ignore', 'file-served:file-served:GET /.git/config', '--ignore', 'idor:*,csrf:nothing', '--ignore', 'not-run:idor']);
   assert.equal(r.row('file-served:file-served:GET /.git/config').suppressedBy, 'the fixture serves it on purpose', 'the config entry keeps its reason');
-  assert.equal(r.row('not-run:idor')?.verdict, 'suppressed');
-  assert.match(r.row('not-run:idor').suppressedBy, /--ignore/);
+  assert.equal(r.row('not-run:idor:POST /items')?.verdict, 'suppressed');
+  assert.match(r.row('not-run:idor:POST /items').suppressedBy, /--ignore/);
   assert.deepEqual(r.report.unusedIgnores, ['idor:*', 'csrf:nothing']);
   for (const [bad, message] of [['*', /does not start with a known rule/], ['not-run', /name the probe/]]) {
     const refused = await runCli([s.url, '--write', ITEM, '--ignore', bad]);
