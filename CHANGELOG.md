@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+
+- `NOTICES.md` cites OWASP ASVS by name and URL only, so license scanners no longer read the package as carrying CC BY-SA.
+
 ## 1.1.0
 
 - `--origin-check always`, `--no-ambient`, `--host-check` / `--strict-host`, `--openapi <file>`, `--json` and a repeatable
