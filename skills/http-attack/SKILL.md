@@ -87,9 +87,10 @@ Notes:
   operation (the most specific template; `2XX` and `default` count). A path the contract lacks is not judged.
 - Persistence is a two-step run around a restart: `--persist-save state.json`, restart the app, `--persist-verify state.json` (the file must be inside the working or temp
   directory, or the config must name its directory in `persistDir`).
-- Other databases: `faultCmd` (`"docker pause db"`) and `faultRestore` (`"docker unpause db"`) in the config file: any shell
-  command that breaks the database and the one that heals it (the restore always runs). They are read only from the config
-  file, never from the command line, because they run a shell: have the user review them before the run.
+- Other databases: `faultCmd` (`["docker", "pause", "db"]`) and `faultRestore` (`["docker", "unpause", "db"]`) in the config file: the
+  command that breaks the database and the one that heals it (the restore always runs). Prefer the list form: it runs without a shell, so
+  there is no quoting or expansion and it behaves the same on Windows and POSIX. A string (`"docker pause db"`) runs through the system shell.
+  They are read only from the config file, never from the command line: have the user review them before the run.
 - On Git Bash for Windows set `MSYS_NO_PATHCONV=1` so `/items` is not rewritten into a Windows path, and give the app and
   `--fault-sqlite` the same absolute Windows path (`D:/app/data/app.db`).
 
@@ -129,7 +130,7 @@ a check, so they are accepted only inside one route and only with a `reason`:
 | `vary`, `contentType` | as the flags |
 | `ignore` | `{id, reason}`: `id` is a finding id (shown in every report row), a rule name (`stack-leak`), `<rule>:<probe>` (every target of that probe), or `<rule>:<prefix>*`. It must start with a known rule and a reason is mandatory. `not-run` is never accepted alone: name the probe (`not-run:<probe>`) so one gap cannot hide the others |
 
-The config can also hold `faultCmd`, `faultRestore`, `persistDir`, and list `writes`, `reads`, `searches`, `uniques` (bodies as objects or `"@file"`) and `persistIgnore`
+The config can also hold `faultCmd`, `faultRestore` (a list, run without a shell, or a string, run through the shell), `persistDir`, and list `writes`, `reads`, `searches`, `uniques` (bodies as objects or `"@file"`) and `persistIgnore`
 (fields skipped when comparing the persisted item).
 
 ## Reading the report

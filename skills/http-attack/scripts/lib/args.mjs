@@ -48,8 +48,9 @@ Expectations
 
 Faults and durability
   --fault-sqlite <file>              holds BEGIN EXCLUSIVE on the app's SQLite file while the first --write is sent.
-                                     Any other fault (docker pause db) is a shell command and is only read from the config
-                                     file (faultCmd, faultRestore), never from the command line.
+                                     Any other fault (docker pause db) is only read from the config file (faultCmd,
+                                     faultRestore), never from the command line: an argv list run without a shell
+                                     (preferred), or a command line run through the shell.
   --persist-save <file>              create one item through the first --write, save how to read it back, then stop.
   --persist-verify <file>            after a restart, read the saved item back and compare it.
 

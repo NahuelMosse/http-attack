@@ -148,6 +148,18 @@ test('faultCmd and faultRestore (config only): the fault is injected, the 5xx ju
   });
 });
 
+test('faultCmd and faultRestore as lists run without a shell: injected and restored', () => {
+  const dir = tempDir();
+  const flag = join(dir, 'fault.flag');
+  const toggle = join(ROOT, 'tests', 'helpers', 'toggle.mjs');
+  return withServer({ faultFile: flag }, async (s) => {
+    const r = await attack(s.url, [...ALICE, '--write', ITEM,
+      ...config(dir, { faultCmd: [process.execPath, toggle, 'on', flag], faultRestore: [process.execPath, toggle, 'off', flag] })]);
+    assert.equal(r.byProbe('database-fault')[0].verdict, 'pass');
+    assert.ok(!existsSync(flag), 'the restore command ran');
+  });
+});
+
 test('the fault command text never reaches the report', () => {
   const dir = tempDir();
   const flag = join(dir, 'fault.flag');

@@ -79,7 +79,11 @@ export function loadConfig(file, { cwd = process.cwd(), env = process.env, json:
   const ignore = json.ignore ?? [];
   if (!Array.isArray(ignore)) fail(path, '"ignore" must be a list.');
   ignore.forEach((entry, i) => checkIgnore(path, entry, i));
-  for (const k of ['faultCmd', 'faultRestore', 'persistDir']) if (k in json && typeof json[k] !== 'string') fail(path, `"${k}" must be a string.`);
+  if ('persistDir' in json && typeof json.persistDir !== 'string') fail(path, '"persistDir" must be a string.');
+  for (const k of ['faultCmd', 'faultRestore']) {
+    const v = json[k];
+    if (k in json && typeof v !== 'string' && !(Array.isArray(v) && v.length && v.every((a) => typeof a === 'string' && a))) fail(path, `"${k}" must be a string (run through the shell) or a non-empty list of non-empty strings (an argv, run without a shell).`);
+  }
   if (json.faultRestore && !json.faultCmd) fail(path, '"faultRestore" needs "faultCmd".');
   const list = (k) => { const v = json[k] ?? []; if (!Array.isArray(v)) fail(path, `"${k}" must be a list.`); return v; };
   const requests = (k) => list(k).map((r, i) => requestOf(path, `${k}[${i}]`, r, cwd, env, toJson));
