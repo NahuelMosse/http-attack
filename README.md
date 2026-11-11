@@ -153,7 +153,7 @@ claude plugin install http-attack@http-attack
 Pin a release by adding the tag to the marketplace source:
 
 ```bash
-claude plugin marketplace add NahuelMosse/http-attack#v1.1.1
+claude plugin marketplace add NahuelMosse/http-attack#v1.2.0
 ```
 
 Update with `claude plugin marketplace update http-attack`, then `claude plugin update http-attack@http-attack`.

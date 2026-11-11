@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0
+## 1.2.0 - 2026-11-11
 
 - `import { attack } from 'http-attack'`: a documented programmatic entry (with an `exports` map) that takes the command-line
   arguments and resolves to the report object, `exitCode` included, instead of printing and exiting. `renderText` and
