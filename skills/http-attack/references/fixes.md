@@ -1,7 +1,7 @@
 # Fixes by finding and stack
 
 Fix the cause in the app; do not special-case the probe. If a finding is correct behaviour for the route, suppress it in
-`http-attack.config.json` with the reason (see SKILL.md). Rule names are the ones in the severity table.
+`http-attack.config.json` with the reason (see config.md). Rule names are the ones in the severity table.
 
 ## input: `accepted-invalid`, `server-error`, `media-type-strict`, `no-body-limit`, `limit-counts-characters`
 

@@ -46,7 +46,7 @@ const requestOf = (file, where, r, cwd, env, json) => {
 };
 
 // An ignore id is a finding id or a prefix ending in *, always starting with a known rule: a bare "*" silences everything.
-const checkIgnore = (file, entry, i) => {
+export const checkIgnore = (file, entry, i) => {
   if (typeof entry?.id !== 'string' || !entry.id.trim()) fail(file, `ignore[${i}] needs an "id" (a finding id, a rule name, or "<rule>:<prefix>*").`);
   if (typeof entry.reason !== 'string' || !entry.reason.trim()) fail(file, `ignore[${i}] ("${entry.id}") needs a non-empty "reason": a suppression without a reason is not accepted.`);
   const rule = entry.id.split(':')[0];

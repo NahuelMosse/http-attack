@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROOT } from './helpers/cli.mjs';
 
@@ -23,6 +23,20 @@ test('ci.yml declares its jobs and validates the plugin with a pinned claude-cod
   const names = [...jobs.matchAll(/^ {2}([a-z-]+):$/gm)].map((m) => m[1]);
   assert.deepEqual(names, ['test', 'validate']);
   assert.match(yml, /@anthropic-ai\/claude-code@\d+\.\d+\.\d+ plugin validate/);
+});
+
+test('every test file runs in exactly one of test:unit and test:e2e', () => {
+  const { scripts } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+  const filesOf = (name) => scripts[name].match(/tests\/[\w-]+\.test\.mjs/g) ?? [];
+  const all = readdirSync(join(ROOT, 'tests')).filter((f) => f.endsWith('.test.mjs')).map((f) => `tests/${f}`).sort();
+  assert.deepEqual([...filesOf('test:unit'), ...filesOf('test:e2e')].sort(), all);
+  assert.equal(scripts.test, 'npm run test:unit && npm run test:e2e');
+});
+
+test('ci.yml runs both test scripts', () => {
+  const yml = readFileSync(join(ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+  assert.match(yml, /run: npm run test:unit$/m);
+  assert.match(yml, /run: npm run test:e2e$/m);
 });
 
 test('a temp dir made by the test helpers is removed when the process exits', () => {

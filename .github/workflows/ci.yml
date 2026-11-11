@@ -20,8 +20,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      - name: Unit and integration tests
-        run: npm test
+      - name: Unit tests
+        run: npm run test:unit
+      - name: End-to-end tests
+        run: npm run test:e2e
       - name: Fixtures end to end, three identical runs
         run: node tests/e2e-fixtures.mjs 3
   validate:

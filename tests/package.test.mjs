@@ -22,6 +22,7 @@ test('package.json is publishable and its version matches the plugin manifest', 
   assert.equal(pkg.private, undefined);
   assert.equal(pkg.version, json('.claude-plugin', 'plugin.json').version);
   assert.deepEqual(pkg.bin, { 'http-attack': BIN });
+  assert.deepEqual(pkg.exports, { '.': './skills/http-attack/scripts/index.mjs', './package.json': './package.json' });
   assert.deepEqual(pkg.publishConfig, { access: 'public', provenance: true });
   assert.equal(pkg.dependencies, undefined, 'zero runtime dependencies');
   assert.match(pkg.repository.url, /^git\+https:\/\/github\.com\/NahuelMosse\/http-attack\.git$/);
@@ -39,6 +40,9 @@ test('the tarball holds exactly the expected files, installs into an empty proje
   await npm(['install', '--no-audit', '--no-fund', '--ignore-scripts', join(dest, packed.filename)], project);
   const installed = join(project, 'node_modules', 'http-attack');
   const entry = join(installed, ...JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8')).bin['http-attack'].split('/'));
+
+  const imported = await run(process.execPath, ['--input-type=module', '-e', "import('http-attack').then((m) => console.log(Object.keys(m).sort().join()))"], { cwd: project, encoding: 'utf8' });
+  assert.equal(imported.stdout.trim(), 'attack,renderJson,renderText');
 
   const viaShim = await npm(['exec', '--no-install', '--', 'http-attack', '--help'], project);
   assert.match(viaShim.stdout, /usage: node http-attack\.mjs/);

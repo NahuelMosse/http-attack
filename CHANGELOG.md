@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0
+
+- `import { attack } from 'http-attack'`: a documented programmatic entry (with an `exports` map) that takes the command-line
+  arguments and resolves to the report object, `exitCode` included, instead of printing and exiting. `renderText` and
+  `renderJson` are exported with it.
+- `--ignore <id>`: repeatable, or comma-separated; added to the config file's `ignore` list and checked by the same rules.
+- `faultCmd` and `faultRestore` accept an argv list, run without a shell (preferred); a string still runs through the shell.
+- `npm run test:unit` (no servers, seconds) and `npm run test:e2e`; `npm test` runs both, and so does CI.
+- The README has a table of every flag with its value and default, checked against the parser by the docs tests.
+- SKILL.md keeps the workflow; the severity table, the probe list and the config reference moved to `references/`.
+
 ## 1.1.1
 
 - `NOTICES.md` cites OWASP ASVS by name and URL only, so license scanners no longer read the package as carrying CC BY-SA.

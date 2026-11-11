@@ -19,7 +19,7 @@ const URL_ = 'http://127.0.0.1:9';
 test('--help prints every option and exits 0', async () => {
   const r = await runCli(['--help']);
   assert.equal(r.code, 0);
-  for (const flag of ['--write', '--fault-sqlite', '--config', '--auth-header-name', '--vary', '--content-type', '--race-count']) assert.match(r.stdout, new RegExp(flag));
+  for (const flag of ['--write', '--fault-sqlite', '--config', '--auth-header-name', '--vary', '--content-type', '--race-count', '--ignore']) assert.match(r.stdout, new RegExp(flag));
   assert.doesNotMatch(r.stdout, /allow[-_]remote/i);
   assert.doesNotMatch(r.stdout, /--fault-cmd|--fault-restore/, 'shell commands are not accepted on the command line');
 });

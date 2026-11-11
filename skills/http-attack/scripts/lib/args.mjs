@@ -45,6 +45,8 @@ Expectations
   --openapi <file>                   an OpenAPI file (JSON or YAML): every status the app answered must be one the
                                      contract declares for that operation.
   --config <file>                   per-route expectations and suppressions (default ./http-attack.config.json if present).
+  --ignore <id>                      suppress a finding id, a rule name or "<rule>:<prefix>*", as the config file's ignore list
+                                     does; it is added to that list. Repeatable, or comma-separated.
 
 Faults and durability
   --fault-sqlite <file>              holds BEGIN EXCLUSIVE on the app's SQLite file while the first --write is sent.
@@ -137,7 +139,7 @@ export const requestSpec = (text, flag, { cwd, env, contentType, json = false })
 export const FLAGS_WITH_VALUE = new Set(['--write', '--read', '--search', '--unique', '--item-path', '--vary', '--content-type', '--header',
   '--auth-env', '--auth-header-name', '--other-header', '--other-auth-env', '--common-headers', '--raw-exempt', '--body-limit', '--config',
   '--fault-sqlite', '--persist-save', '--persist-verify', '--race-count', '--race-attempts',
-  '--hang-ms', '--format', '--origin-check', '--openapi', '--leak-path']);
+  '--hang-ms', '--format', '--origin-check', '--openapi', '--leak-path', '--ignore']);
 
 export const BOOLEAN_FLAGS = new Set(['--csrf', '--json', '--no-ambient', '--strict-host', '--host-check', '--help']);
 const BOOLEAN_OPTIONS = { '--csrf': 'csrf', '--json': 'json', '--no-ambient': 'noAmbient', '--strict-host': 'strictHost', '--host-check': 'hostCheck' };
@@ -158,7 +160,7 @@ export const parseBase = (text, env = process.env) => {
 export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {}) {
   const opt = {
     writes: [], reads: [], searches: [], uniques: [], common: [], headers: {}, otherHeaders: {}, authHeaderNames: [],
-    leakPaths: [], csrf: false, json: false, hostCheck: false, noAmbient: false, strictHost: false, originCheck: 'cookie',
+    leakPaths: [], ignore: [], csrf: false, json: false, hostCheck: false, noAmbient: false, strictHost: false, originCheck: 'cookie',
     format: 'text', help: false, raceCount: 8, raceAttempts: 1, hangMs: 6000,
   };
   if (argv.includes('--help') || argv.includes('-h')) return { help: true, opt: { ...opt, help: true } };
@@ -203,6 +205,7 @@ export function parseArgs(argv, { cwd = process.cwd(), env = process.env } = {})
       case '--origin-check': need(value === 'always' || value === 'cookie', `--origin-check wants always or cookie, got "${value}".`); opt.originCheck = value; break;
       case '--openapi': opt.openapi = resolve(cwd, value); break;
       case '--leak-path': opt.leakPaths.push(toPath(value, env)); break;
+      case '--ignore': opt.ignore.push(...value.split(',').map((id) => id.trim()).filter(Boolean)); break;
       default: throw new UsageError(`Unknown option ${flag}.`);
     }
   }

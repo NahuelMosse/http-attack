@@ -39,8 +39,59 @@ example `server-error:path-param-letters:GET /items/{id}`; it never contains gen
 `fail`, `not-run`, `skipped`, `suppressed` or `info` (reported, never a finding, never an exit 1); `rule` is `null` on every
 row that is not a finding.
 
-Flags beyond the routes and credentials: `--origin-check always|cookie`, `--no-ambient`, `--host-check`, `--strict-host`,
-`--leak-path <path>` (repeatable), `--openapi <file>` and `--json`, described below.
+## Flags
+
+`--help` prints the same list. Repeatable flags may be given several times.
+
+| Flag | Value | Default | What it does |
+|---|---|---|---|
+| `--write` | `"<METHOD> <path> <body>"` | - | a request that creates or changes state, with a legitimate body (JSON, a form, or `@file`). Repeatable |
+| `--read` | `"<path>"` | - | a request that returns data, with its query if any. Repeatable |
+| `--search` | `"<path> <param>"` | - | a read with a free-text search parameter. Repeatable |
+| `--unique` | `"<METHOD> <path> <body>"` | - | a create guarded by a unique key: N identical requests are sent at once. Repeatable |
+| `--item-path` | `"/items/{id}"` | - | where a created item is read back when the create answers no `Location` |
+| `--vary` | `<json-pointer \| field>` | the first string with an `@`, else the first string | the body field that keeps requests apart |
+| `--content-type` | `<type>` | `application/json`, or a form | the media type of every write body |
+| `--json` | - | - | send form bodies as JSON objects of the same fields |
+| `--header` | `"Name: value"` | - | sent on every request (user A). Repeatable |
+| `--auth-env` | `<VAR>` | - | sends `Authorization: Bearer $VAR` without the token on the command line |
+| `--auth-header-name` | `<name>` | - | a custom header that carries credentials: removed in the no-credentials rows |
+| `--other-header` | `"Name: value"` | - | user B's credentials, for the ownership (IDOR) rows. Repeatable |
+| `--other-auth-env` | `<VAR>` | - | user B's bearer token from an environment variable |
+| `--common-headers` | `"A, B"` | - | headers every response must carry, parser errors included |
+| `--raw-exempt` | `"<why>"` | - | parser errors are answered by a proxy before the app: skip the common-header check there |
+| `--body-limit` | `<bytes>` | - | the documented body limit |
+| `--csrf` | - | - | the app authenticates with cookies: cross-origin writes must be refused |
+| `--origin-check` | `always` or `cookie` | `cookie` | `always`: every write and read is also sent from a foreign Origin and must be refused; `cookie`: only the `--csrf` rows |
+| `--no-ambient` | - | - | the API takes no credential a browser sends on its own: the origin rows become one check. Not with `--csrf` |
+| `--host-check` | - | - | every write and read is also sent with a foreign Host; accepted, it is an info row |
+| `--strict-host` | - | - | the same, and an accepted foreign Host is a finding |
+| `--leak-path` | `<path>` | - | one more file the app must not serve. Repeatable |
+| `--openapi` | `<file>` | - | every status the app answered must be one the contract declares |
+| `--config` | `<file>` | `./http-attack.config.json` if present | per-route expectations and suppressions |
+| `--ignore` | `<id>` | - | suppress a finding id, a rule name or `<rule>:<prefix>*`, added to the config's `ignore` list. Repeatable, or comma-separated |
+| `--fault-sqlite` | `<file>` | - | holds `BEGIN EXCLUSIVE` on the app's SQLite file while the first `--write` is sent |
+| `--persist-save` | `<file>` | - | create one item through the first `--write`, save how to read it back, then stop |
+| `--persist-verify` | `<file>` | - | after a restart, read the saved item back and compare it |
+| `--race-count` | `<n>` | `8` | identical requests per race |
+| `--race-attempts` | `<n>` | `1` | races to try before concluding |
+| `--hang-ms` | `<ms>` | `6000` | how long a never-ending body is waited for |
+| `--format` | `text` or `json` | `text` | report format |
+| `--help` | - | - | print the options |
+
+## Programmatic use
+
+```js
+import { attack } from 'http-attack';
+
+const report = await attack(['http://127.0.0.1:3000', '--write', 'POST /items {"name":"Ana"}', '--ignore', 'not-run:idor']);
+console.log(report.exitCode, report.summary, report.rows.filter((row) => row.verdict === 'fail'));
+```
+
+`attack(argv, { cwd, env })` takes the command-line arguments and resolves to the report object (`base`, `rows`, `summary`,
+`unusedIgnores`, `unusedRoutes`, `exitCode`) without printing or exiting. A bad argument or config rejects with an error
+whose message says what to fix. `--help`, `--persist-save` and `--persist-verify` are command-line only. `renderText(report)`
+and `renderJson(report)` produce the same output as the CLI.
 
 ## Config reference
 
@@ -114,7 +165,9 @@ The skill directory is self-contained: `npx skills add NahuelMosse/http-attack` 
 ## Development
 
 ```bash
-npm test                         # unit and integration tests
+npm run test:unit                # no servers, seconds: the inner loop
+npm run test:e2e                 # the fixtures and every test that starts a server
+npm test                         # both
 node tests/e2e-fixtures.mjs 3     # attack both fixtures three times: identical results, the fixed one clean
 ```
 
