@@ -6,6 +6,10 @@ server: malformed bodies, hostile paths, raw parser errors, concurrent duplicate
 SQL injection in search, database faults, missing authentication, IDOR and CSRF. Each failure is reported with a severity,
 the response that would have been correct, and a stable id you can suppress with a reason.
 
+![http-attack finding real issues: a LIKE wildcard leak and a stack trace on malformed JSON](docs/demo.gif)
+
+More demos and install options: https://lab.nawi.dev/tools/
+
 Zero runtime dependencies. Node 22.13 or newer. Loopback hosts only.
 
 > The probes create and delete rows, lock the database and send 50 MB bodies. Run them against a throwaway database, and
