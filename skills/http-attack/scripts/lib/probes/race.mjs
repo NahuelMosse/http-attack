@@ -1,8 +1,10 @@
 import { connect } from 'node:net';
-import { switchToJsonOn415, wire } from '../body.mjs';
+import { switchToJsonOn415, wire, withField } from '../body.mjs';
 import { granted } from '../http.mjs';
 
 // Identical creates at once: check-then-insert lets more than one through, or turns the constraint violation into a 500.
+// After the race, one more request carries the unique field with its letters' case swapped: a key that is unique ignoring
+// case refuses it too (its own row, `race-case-twin`, so a key case-sensitive by design is ignored apart from the race).
 // Last-byte synchronization over raw sockets: every connection gets its request minus the final byte, then the final bytes go
 // out in one synchronous loop. Three details keep the racers inside one server read batch:
 // - Nagle is off: a 1-byte write behind unacknowledged data otherwise waits for the peer's delayed ACK (~200 ms on Windows).
@@ -48,6 +50,8 @@ const ID_SEGMENT = /^(\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 const locationId = (location) => (location ?? '').split(/[?#]/)[0].replace(/^[a-z]+:\/\/[^/]+/i, '')
   .split('/').filter((seg) => ID_SEGMENT.test(seg)).at(-1) ?? null;
 
+const swapCase = (v) => v.replace(/\p{L}/gu, (c) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()));
+
 // The identity of the item a success created: the id in its Location, else the id in the JSON body.
 const identityOf = (r) => {
   const fromLocation = locationId(r.headers.location);
@@ -61,6 +65,7 @@ export async function raceProbe(run, u) {
   const spec = { group: 'concurrency', probe: 'race-identical-creates', target, name: `${target} x${opts.raceCount} identical requests at once` };
   const st = run.settings(u.method, u.path);
   const expected = `exactly one 201, the other ${opts.raceCount - 1} 409`;
+  const isCreated = (x) => (x.s >= 200 && x.s < 300) || (x.s >= 300 && x.s < 400 && granted(x) && locationId(x.headers.location));
   const bytesOf = (p) => {
     const data = Buffer.from(p.text);
     const head = Object.entries({ host: client.base.host, ...opts.headers, 'content-type': p.type, 'content-length': data.length, connection: 'close' })
@@ -88,7 +93,8 @@ export async function raceProbe(run, u) {
 
   let last = null;
   for (let attempt = 1; attempt <= opts.raceAttempts; attempt++) {
-    const racerBytes = bytesOf(wire(u, st));
+    const p = wire(u, st);
+    const racerBytes = bytesOf(p);
     const [pacer, ...racers] = await Promise.all([open(bytesOf(wire(u, st))), ...Array.from({ length: opts.raceCount }, () => open(racerBytes))]);
     await new Promise((r) => setTimeout(r, SETTLE_MS));
     if (pacer.sock && !pacer.sock.destroyed) pacer.sock.write(pacer.last);
@@ -98,15 +104,25 @@ export async function raceProbe(run, u) {
     // A form refused with 415 by every racer is an API that wants JSON: the race is tried again as JSON.
     if (all.every((x) => x.s === 415) && switchToJsonOn415(u, 415, st)) { attempt--; continue; }
     const verdict = judge(all);
-    last = { ...verdict, attempt };
+    last = { ...verdict, attempt, p, all };
     if (verdict.kind !== 'pass') break;
+  }
+
+  // The twin goes alone, after the race: it measures what the unique key compares, not timing.
+  let twin = null;
+  const twinText = last.kind === 'not-run' ? null : withField(last.p, swapCase);
+  if (twinText !== null && twinText !== last.p.text) {
+    const c = await open(bytesOf({ ...last.p, text: twinText }));
+    if (c.sock && !c.sock.destroyed) c.sock.write(c.last);
+    const result = await c.settled;
+    twin = { ...judgeTwin(last.all, result), codes: `${result.s ?? `drop:${result.err}`}` };
   }
 
   function judge(all) {
     const codes = all.map((x) => x.s ?? `drop:${x.err}`);
     // A 3xx is a success too when it redirects to an item (POST/redirect/GET, or the one that already exists): granted, and
     // its Location names an id. Any other redirect (back to a form) is a rejection.
-    const created = all.filter((x) => (x.s >= 200 && x.s < 300) || (x.s >= 300 && x.s < 400 && granted(x) && locationId(x.headers.location)));
+    const created = all.filter(isCreated);
     const five = all.filter((x) => x.s >= 500).length;
     const drop = all.filter((x) => x.s === null).length;
     const joined = codes.join(' ');
@@ -126,10 +142,28 @@ export async function raceProbe(run, u) {
     return { kind: 'pass', codes: joined };
   }
 
+  // A twin that succeeds after a success of the race stored two values that differ only in case.
+  function judgeTwin(all, tw) {
+    if (tw.s === null) return { kind: 'drop', why: 'the case-swapped twin closes the connection: map the unique-violation error to 409' };
+    if (tw.s >= 500) return { kind: 'five', why: 'the case-swapped twin hits a 5xx: map the unique-violation error to 409', sample: tw };
+    const rival = all.find(isCreated);
+    if (isCreated(tw) && rival && !(identityOf(tw) && identityOf(tw) === identityOf(rival))) {
+      return { kind: 'duplicates', why: 'a value that differs only in case was stored too: the unique key is case-sensitive (if that is by design, ignore this row)' };
+    }
+    return { kind: 'pass' };
+  }
+
   const at = last.attempt > 1 || opts.raceAttempts > 1 ? ` (attempt ${last.attempt} of ${opts.raceAttempts})` : '';
-  if (last.kind === 'not-run') run.notRun(spec, last.why);
-  else if (last.kind === 'duplicates') run.fail('duplicates-stored', spec, last.codes, expected, last.why + at);
-  else if (last.kind === 'five') await run.transportFault(last.sample, { ...spec, hint: last.why }, expected);
-  else if (last.kind === 'drop') run.fail('connection-dropped', spec, last.codes, expected, last.why + at);
-  else run.pass(spec, last.codes, expected, last.why);
+  const report = async (rowSpec, v, codes, want, suffix = '') => {
+    if (v.kind === 'not-run') run.notRun(rowSpec, v.why);
+    else if (v.kind === 'duplicates') run.fail('duplicates-stored', rowSpec, codes, want, v.why + suffix);
+    else if (v.kind === 'five') await run.transportFault(v.sample, { ...rowSpec, hint: v.why }, want);
+    else if (v.kind === 'drop') run.fail('connection-dropped', rowSpec, codes, want, v.why + suffix);
+    else run.pass(rowSpec, codes, want, v.why);
+  };
+  await report(spec, last, last.codes, expected, at);
+  if (twin) {
+    const twinSpec = { group: 'concurrency', probe: 'race-case-twin', target, name: `${target} one more request whose unique field differs only in case` };
+    await report(twinSpec, twin, twin.codes, '409 when the key is unique ignoring case, never a 5xx');
+  }
 }

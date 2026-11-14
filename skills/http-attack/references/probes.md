@@ -7,7 +7,7 @@
 | search | `%`, `_`, quotes, `\`, `' OR 1=1 --`, compared as parsed rows against a search that matches nothing | only rows containing the literal text |
 | parser (raw socket) | `GARBAGE` request line, non-ASCII bytes in the path, an oversized header, `Content-Length` with `Transfer-Encoding` | 400/431 with the common headers, connection closed |
 | resources | 50 MB `text/plain` to a JSON route, a chunked body that never ends (sends limit+1 bytes) | 415 at the first bytes; 413 at the limit or 408/close |
-| concurrency | N identical creates released together (last-byte sync) | exactly one 201, the rest 409 |
+| concurrency | N identical creates released together (last-byte sync); then one twin whose varied field differs only in letter case (row `race-case-twin`) | exactly one 201, the rest 409; the twin 409, never a 5xx (a key case-sensitive by design: ignore that row) |
 | faults | a legitimate write while the database is locked or broken (`--fault-sqlite`, or `faultCmd` in the config) | 503/500 with a generic body, the process keeps answering |
 | auth | each write and read without credentials; user B reads and deletes A's item (after checking B can use its own) | 401 (or a redirect to login); 404/403 for B |
 | csrf | write with a foreign `Origin`, another port of the same host, `Origin: null` | 4xx |

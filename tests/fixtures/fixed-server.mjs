@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 const [port, file] = process.argv.slice(2);
 const db = new DatabaseSync(file);
 db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL');
-db.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, owner TEXT, name TEXT, email TEXT UNIQUE); CREATE TABLE IF NOT EXISTS audit (at TEXT); CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, owner TEXT, title TEXT UNIQUE)');
+db.exec('CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, owner TEXT, name TEXT, email TEXT UNIQUE COLLATE NOCASE); CREATE TABLE IF NOT EXISTS audit (at TEXT); CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, owner TEXT, title TEXT UNIQUE COLLATE NOCASE)');
 
 const BODY_LIMIT = 64 * 1024;
 const DRAIN_CAP = 8 * 1024 * 1024;

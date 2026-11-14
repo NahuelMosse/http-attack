@@ -12,6 +12,8 @@
   "csrf:origin-null-origin:POST /notes",
   "double-slash-mismatch:double-slash:GET /items",
   "double-slash-mismatch:double-slash:GET /notes",
+  "duplicates-stored:race-case-twin:POST /items",
+  "duplicates-stored:race-case-twin:POST /notes",
   "duplicates-stored:race-identical-creates:POST /notes",
   "file-served:file-served:GET /.git/config",
   "head-unsupported:head:HEAD /items",
