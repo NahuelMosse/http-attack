@@ -38,6 +38,6 @@
   "scripts": {
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "node --test --test-force-exit --test-concurrency=4 tests/args.test.mjs tests/docs.test.mjs tests/repo.test.mjs",
-    "test:e2e": "node --test --test-force-exit --test-concurrency=4 tests/api.test.mjs tests/cli.test.mjs tests/findings.test.mjs tests/fixtures.test.mjs tests/origin-host-contract.test.mjs tests/package.test.mjs tests/parity.test.mjs tests/review-fixes.test.mjs"
+    "test:e2e": "node --test --test-force-exit --test-concurrency=4 tests/api.test.mjs tests/cli.test.mjs tests/findings.test.mjs tests/fixtures.test.mjs tests/origin-host-contract.test.mjs tests/package.test.mjs tests/parity.test.mjs tests/review-fixes.test.mjs tests/race-case-twin.test.mjs"
   }
 }

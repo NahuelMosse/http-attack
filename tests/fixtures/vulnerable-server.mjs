@@ -34,12 +34,15 @@
 // [D5] check-then-insert without a transaction: the UNIQUE violation of a race escapes as a 500
 //   id: server-error:race-identical-creates:POST /items
 //   id: stack-leak:race-identical-creates:POST /items
+//   (the email check is case-sensitive, so an email that differs only in case is stored too)
+//   id: duplicates-stored:race-case-twin:POST /items
 // [D6] /notes has no authentication and no owner: anyone reads it, and user B reads what user A created
 //   id: unauthenticated-access:write-without-credentials:POST /notes
 //   id: unauthenticated-access:item-without-credentials:GET /notes/{id}
 //   id: idor:idor-get:GET /notes/{id}
 // [D7] /notes has no unique key: identical creates are all stored
 //   id: duplicates-stored:race-identical-creates:POST /notes
+//   id: duplicates-stored:race-case-twin:POST /notes
 // [D8] no Origin check on writes (CSRF)
 //   id: csrf:origin-another-site:POST /items
 //   id: csrf:origin-another-port:POST /items
