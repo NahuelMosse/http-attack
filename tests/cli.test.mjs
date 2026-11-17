@@ -75,6 +75,7 @@ test('a malformed config exits 2: unknown key, ignore without a reason, unknown 
     [{ routes: { '/a': { public: true } } }, /needs a non-empty "reason"/],
     [{ routes: { '/a': { idempotentCreate: true, reason: ' ' } } }, /needs a non-empty "reason"/],
     [{ faultRestore: 'x' }, /needs "faultCmd"/],
+    [{ faultCmd: 'x' }, /"faultCmd" needs "faultRestore"/],
     [{ faultCmd: [] }, /"faultCmd" must be a string/],
     [{ faultCmd: [1] }, /"faultCmd" must be a string/],
     [{ faultCmd: ['a', ''] }, /"faultCmd" must be a string/],

@@ -47,7 +47,7 @@ export async function persistSave(run, file) {
   const p = wire(w, run.settings(w.method, w.path));
   const res = await run.client.send(w.method, w.path, { body: p.text, type: p.type, common: false });
   if (res.s === null) throw new Error(`the create did not answer: ${res.err}`);
-  if (!granted(res)) throw new UsageError(res.s >= 300 ? `The create was redirected to login (${res.headers.location}): the credentials do not work.` : `The create answered ${res.s}: nothing was saved.`);
+  if (!granted(res)) throw new UsageError(res.s >= 300 && res.s < 400 ? `The create was redirected to login (${res.headers.location}): the credentials do not work.` : `The create answered ${res.s}: nothing was saved.`);
   const item = itemUrlOf(res,{ base: run.client.base, itemPath: run.itemPath });
   if (!item) throw new UsageError(`The create answered ${res.s} without a readable location (give --item-path).`);
   const read = await run.client.send('GET', item, { common: false });

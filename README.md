@@ -126,7 +126,7 @@ and `renderJson(report)` produce the same output as the CLI.
 | `vary`, `contentType` | the body field that keeps requests apart (JSON pointer), the media type of write bodies |
 | `routes` | the settings above per path (`"/items"`), per request (`"POST /items"`) or per template (`"/items/{id}"`); `public` and `idempotentCreate` exist only here. `bodyLimit`, `maxHeaderBytes`, `invalidUtf8`, `vary`, `contentType` may also be top-level defaults |
 | `commonHeaders`, `rawExempt`, `authHeaderNames`, `itemPath`, `persistIgnore` | as the flags of the same name |
-| `faultCmd`, `faultRestore` | commands that break and heal the database. Preferred: a list, run without a shell (`["docker", "pause", "db"]`); a string runs through the system shell. Config only, never a flag |
+| `faultCmd`, `faultRestore` | commands that break and heal the database; one needs the other. Preferred: a list, run without a shell (`["docker", "pause", "db"]`); a string runs through the system shell. Config only, never a flag |
 | `persistDir` | a directory outside the working and temp directories where `--persist-save` may write |
 | `writes`, `reads`, `searches`, `uniques` | the routes to attack; bodies as objects or `"@file"` |
 | `ignore` | `{ id, reason }`: a finding id, a rule name, or `<rule>:<prefix>*`; it must start with a known rule. The reason is mandatory |
