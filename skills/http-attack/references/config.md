@@ -30,5 +30,5 @@ a check, so they are accepted only inside one route and only with a `reason`:
 | `vary`, `contentType` | as the flags |
 | `ignore` | `{id, reason}`: `id` is a finding id (shown in every report row), a rule name (`stack-leak`), `<rule>:<probe>` (every target of that probe), or `<rule>:<prefix>*`. It must start with a known rule and a reason is mandatory. `not-run` is never accepted alone: name the probe (`not-run:<probe>`) so one gap cannot hide the others. `--ignore <id>` on the command line adds ids to this list |
 
-The config can also hold `faultCmd`, `faultRestore` (a list, run without a shell, or a string, run through the shell), `persistDir`, and list `writes`, `reads`, `searches`, `uniques` (bodies as objects or `"@file"`) and `persistIgnore`
+The config can also hold `faultCmd` with its required `faultRestore`, the command that undoes it (a list, run without a shell, or a string, run through the shell), `persistDir`, and list `writes`, `reads`, `searches`, `uniques` (bodies as objects or `"@file"`) and `persistIgnore`
 (fields skipped when comparing the persisted item).

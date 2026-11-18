@@ -5,6 +5,9 @@
 - After its race, `--unique` sends one request whose varied field differs only in letter case, in its own row `race-case-twin`: a
   key unique ignoring case answers it 409; storing it is `duplicates-stored`, and a 5xx is a server error. A key that is
   case-sensitive by design can ignore that row alone.
+- `faultCmd` requires `faultRestore`: a fault with nothing to undo it would outlive the run (a paused container stays paused).
+- A legitimate write or a `--persist-save` create refused with a 4xx is reported with its status; only a 3xx is called a
+  redirect to login.
 
 ## 1.2.0 - 2026-11-11
 

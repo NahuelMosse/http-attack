@@ -177,7 +177,7 @@ test('the fault probe is NOT RUN, and the command never runs, when no legitimate
   const flag = join(dir, 'fault.flag');
   const toggle = join(ROOT, 'tests', 'helpers', 'toggle.mjs');
   return withServer({ faultFile: flag }, async (s) => {
-    const r = await attack(s.url, [...ALICE, '--write', 'POST /items {"nope":1}', ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"` })]);
+    const r = await attack(s.url, [...ALICE, '--write', 'POST /items {"nope":1}', ...config(dir, { faultCmd: `node "${toggle}" on "${flag}"`, faultRestore: `node "${toggle}" off "${flag}"` })]);
     assert.equal(r.byProbe('database-fault')[0].verdict, 'not-run');
     assert.match(r.byProbe('database-fault')[0].evidence, /no legitimate write succeeded/);
     assert.ok(!existsSync(flag), 'the fault command did not run');
@@ -359,6 +359,21 @@ test('credentials that are redirected to login make the legitimate write NOT RUN
   assert.match(r.row('not-run:legit-write:POST /items')?.evidence ?? '', /redirected to login.*credentials do not work/);
   assert.deepEqual(r.findings.filter((id) => /^(unauthenticated-access|idor):/.test(id)), [], 'no unauthenticated-access or idor finding is built on a redirect');
   assert.ok(r.report.summary.notRun >= 1);
+}));
+
+test('a legitimate write refused with a 4xx is reported with its status, not as a login redirect', () => withServer({}, async (s) => {
+  const r = await attack(s.url, [...ALICE, '--write', 'POST /items {"nope":1}']);
+  const evidence = r.row('not-run:legit-write:POST /items')?.evidence ?? '';
+  assert.match(evidence, /answered 4\d\d/);
+  assert.doesNotMatch(evidence, /redirected/);
+}));
+
+test('--persist-save with a create refused with a 4xx names the status and saves nothing', () => withServer({}, async (s) => {
+  const file = join(tempDir(), 'state.json');
+  const r = await runCli([s.url, ...ALICE, '--write', 'POST /items {"nope":1}', '--persist-save', file]);
+  assert.equal(r.code, 2);
+  assert.match(r.stderr, /The create answered 4\d\d: nothing was saved/);
+  assert.equal(existsSync(file), false);
 }));
 
 test("user B's credentials redirected to login on create make the ownership probes NOT RUN", () => withServer({ loginRedirect: true }, async (s) => {

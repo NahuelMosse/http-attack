@@ -85,6 +85,8 @@ export function loadConfig(file, { cwd = process.cwd(), env = process.env, json:
     if (k in json && typeof v !== 'string' && !(Array.isArray(v) && v.length && v.every((a) => typeof a === 'string' && a))) fail(path, `"${k}" must be a string (run through the shell) or a non-empty list of non-empty strings (an argv, run without a shell).`);
   }
   if (json.faultRestore && !json.faultCmd) fail(path, '"faultRestore" needs "faultCmd".');
+  // A fault with nothing to undo it outlives the run (a paused container stays paused).
+  if (json.faultCmd && !json.faultRestore) fail(path, '"faultCmd" needs "faultRestore", the command that undoes it (docker pause db → docker unpause db).');
   const list = (k) => { const v = json[k] ?? []; if (!Array.isArray(v)) fail(path, `"${k}" must be a list.`); return v; };
   const requests = (k) => list(k).map((r, i) => requestOf(path, `${k}[${i}]`, r, cwd, env, toJson));
   return {

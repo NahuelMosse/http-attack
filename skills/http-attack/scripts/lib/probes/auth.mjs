@@ -46,7 +46,7 @@ export async function legitWrite(run, w) {
   }
   if (await run.transportFault(res, spec, '2xx')) return { ok: false };
   if (!granted(res)) {
-    run.notRun(spec, res.s >= 300
+    run.notRun(spec, res.s >= 300 && res.s < 400
       ? `the legitimate request was redirected to login (${res.headers.location}): the credentials do not work, so every other row of this write is unreliable`
       : `the legitimate request answered ${res.s} (${snippet(res.text)}): every other row of this write is unreliable until it succeeds`);
     return { ok: false, res };
